@@ -25,7 +25,7 @@ DefectPaste is a GUI application that allows you to manually place defects on ob
 
 3. **Run the application:**
    ```bash
-   python interactive_defect_tool.py
+   python defectpaste.py
    ```
 
 ## 🎮 How to Use

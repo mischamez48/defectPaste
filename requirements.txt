@@ -1,0 +1,17 @@
+# Core dependencies (from original project)
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.21.0
+Pillow>=9.0.0
+matplotlib>=3.5.0
+PyYAML>=6.0
+
+# GUI dependencies for interactive tool
+PyQt5>=5.15.0
+PyQt5-Qt5>=5.15.0
+PyQt5-sip>=12.8.0
+
+# Optional but recommended
+scipy>=1.7.0
+opencv-python>=4.5.0  # For advanced image operations
+tqdm>=4.62.0

@@ -1,17 +1,17 @@
 # DefectPaste 🎯
 
-**Interactive Defect Placement Tool for MVTec AD Dataset**
+**Interactive Copy-Paste Tool for Augmentation**
 
 DefectPaste is a GUI application that allows you to manually place defects on objects with drag-and-drop functionality, perfect for data augmentation and defect analysis workflows.
 
 ## ✨ Features
 
 - **Interactive Defect Placement**: Drag and drop defects onto target images
-- **Real-time Transformations**: Scale, rotate, and adjust opacity of defects
-- **Transparent Overlay**: Defects blend seamlessly with background images
+- **Selection Tool**: Select and copy portions of images to create custom regions
+- **Real-time Transformations**: Scale, rotate, and adjust opacity of defects and regions
 - **Multiple Defect Types**: Support for various defect categories
+- **Paint Brush Tool**: Manual painting and erasing capabilities
 - **Batch Processing**: Save multiple augmented images at once
-- **State Management**: Preserve defect placements when switching between images
 
 ## 🚀 Quick Start
 
@@ -51,29 +51,24 @@ DefectPaste is a GUI application that allows you to manually place defects on ob
 - **Remove**: Click "Remove Selected" to delete the selected defect
 - **Clear All**: Click "Clear All Defects" to remove all defects
 
-### 5. Save Results
+### 5. Selection Tool
+- **Enable Selection Tool**: Check the "Enable Selection Tool" checkbox in the left panel
+- **Choose Mode**: Select "Rectangle" or "Freehand" from the dropdown
+- **Rectangle Selection**: Click and drag to create a rectangular selection
+- **Freehand Selection**: Click and drag to draw a custom selection shape
+- **Auto-Create Region**: Release mouse to automatically create a draggable region and unselect the tool box
+- **Transform Region**: Use the same controls as defects (scale, rotation, opacity)
+
+### 6. Paint Brush Tool
+- **Enable Brush**: Check "Enable Paint Brush" in the left panel
+- **Choose Mode**: Select "Paint" or "Erase" from the dropdown
+- **Adjust Settings**: Set brush size, opacity, and color
+- **Paint**: Click and drag to paint or erase on the canvas
+- **Clear Paint**: Use "Clear Paint Layer" to remove all paint
+
+### 7. Save Results
 - **Save Single**: Click "Save Augmented" to save the current image
 - **Save All**: Click "Save All Augmented..." to batch save all images with their defects
-
-## 🛠️ Controls
-
-### Left Panel - Image & Transform Controls
-- **Target Image List**: Select which image to work on
-- **Scale Slider**: Resize defects (25% - 200%)
-- **Rotation Slider**: Rotate defects (-180° to +180°)
-- **Opacity Slider**: Control transparency (10% - 100%)
-- **Action Buttons**: Remove selected or clear all defects
-
-### Right Panel - Defect Library
-- **Filter Dropdown**: Filter defects by type
-- **Defect List**: Browse available defects
-- **Add Button**: Place selected defect on canvas
-- **Statistics**: View loaded data counts
-
-### Canvas - Main Work Area
-- **Drag & Drop**: Move defects around
-- **Click to Select**: Select defects for transformation
-- **Real-time Preview**: See changes as you make them
 
 ## 💾 File Outputs
 
@@ -92,22 +87,26 @@ When you save an augmented image, DefectPaste creates:
     {
       "type": "",
       "position": [],
-      "scale": ,
-      "rotation": ,
-      "opacity": ,
+      "scale": 1.0,
+      "rotation": 0,
+      "opacity": 0.7,
       "mask_path": "/path/to/mask",
       "defect_image_path": "/path/to/defect"
+    }
+  ],
+  "regions": [
+    {
+      "type": "selected_region",
+      "position": [100, 150],
+      "scale": 1.2,
+      "rotation": 45,
+      "opacity": 0.8,
+      "original_rect": [50, 75, 100, 80],
+      "source": "region_0"
     }
   ]
 }
 ```
-
-## 🔧 Technical Details
-
-### Supported Formats
-- **Images**: PNG, JPG, JPEG
-- **Masks**: PNG (grayscale)
-- **Output**: PNG with transparency support
 
 ## 📋 Requirements
 
@@ -126,7 +125,3 @@ Feel free to submit issues, feature requests, or pull requests to improve Defect
 ## 📄 License
 
 This project is open source and available under the MIT License.
-
----
-
-**DefectPaste** - Copy-paste defects with precision! 🎯

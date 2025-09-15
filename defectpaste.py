@@ -815,68 +815,51 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by rendering the entire scene (WYSIWYG)."""
-        if self.background_tensor is None or self.background_item is None:
+        """Generate the final augmented image by painting the scene (WYSIWYG)."""
+        if self.background_tensor is None:
             return None, None
-        
-        # Get the background image dimensions
+        # Prepare base sizes
         base_h, base_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Create the final image by compositing all layers manually
-        # Start with the background image
-        result_pixmap = QPixmap(base_w, base_h)
-        result_pixmap.fill(Qt.transparent)
-        
-        painter = QPainter(result_pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 1. Draw the background image
+        # Render color image
+        color_img = QImage(base_w, base_h, QImage.Format_RGB888)
+        color_img.fill(QColor(0, 0, 0))
+        painter = QPainter(color_img)
+        # Draw background
         if self.background_item:
-            bg_pixmap = self.background_item.pixmap()
-            painter.drawPixmap(0, 0, bg_pixmap)
+            painter.setOpacity(1.0)
+            painter.drawPixmap(0, 0, self.background_item.pixmap())
         
-        # 2. Draw the paint layer (if it exists and has content)
-        if self.paint_layer and not self.paint_layer.isNull():
-            painter.drawPixmap(0, 0, self.paint_layer)
+        # Draw paint layer
+        if self.paint_layer_item:
+            painter.setOpacity(1.0)
+            painter.drawPixmap(0, 0, self.paint_layer_item.pixmap())
         
-        # 3. Draw all defects
+        # Draw defects with their current opacity
         for item in self.defect_items:
-            painter.setOpacity(item.opacity)
+            painter.setOpacity(float(item.opacity))
             painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
         
-        # 4. Draw all regions
+        # Draw regions with their current opacity
         for item in self.region_items:
-            painter.setOpacity(item.opacity)
+            painter.setOpacity(float(item.opacity))
             painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
-        
         painter.end()
         
-        # Convert to QImage
-        result_image = result_pixmap.toImage()
-        
-        # Convert to RGB format
-        rgb_image = result_image.convertToFormat(QImage.Format_RGB888)
-        
-        # Create mask by compositing all defect and region masks
+        # Render mask (grayscale): draw transformed masks in white
         mask_img = QImage(base_w, base_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
-        mask_painter = QPainter(mask_img)
-        mask_painter.setRenderHint(QPainter.Antialiasing)
-        
-        # Draw defect masks
+        mp = QPainter(mask_img)
         for item in self.defect_items:
-            mask_painter.setOpacity(1.0)
-            mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
-        
-        # Draw region masks
+            mp.setOpacity(1.0)
+            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
         for item in self.region_items:
-            mask_painter.setOpacity(1.0)
-            mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
-        
-        mask_painter.end()
+            mp.setOpacity(1.0)
+            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+        mp.end()
         
         # Convert to tensors
-        color_bytes = rgb_image.bits().asstring(base_w * base_h * 3)
+        color_bytes = color_img.bits().asstring(base_w * base_h * 3)
         color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((base_h, base_w, 3)).copy()
         mask_bytes = mask_img.bits().asstring(base_w * base_h)
         mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((base_h, base_w)).copy()
@@ -1032,11 +1015,11 @@ class DefectPlacementTool(QMainWindow):
         load_targets_action.triggered.connect(self.load_target_images)
         
         # Load defect images directory
-        load_defect_images_action = toolbar.addAction("Load Defect Images Folder")
+        load_defect_images_action = toolbar.addAction("Load Defect Images")
         load_defect_images_action.triggered.connect(self.load_defect_images)
         
         # Load defect masks directory
-        load_defect_masks_action = toolbar.addAction("Load Defect Masks Folder")
+        load_defect_masks_action = toolbar.addAction("Load Defect Masks")
         load_defect_masks_action.triggered.connect(self.load_defect_masks)
         
         toolbar.addSeparator()
@@ -1336,10 +1319,10 @@ class DefectPlacementTool(QMainWindow):
             return
             
         # Update stats if masks are also loaded
-        if self.defect_masks:
-            self._update_stats()
-        else:
-            self.status_bar.showMessage(f"Loaded {len(self.defect_images)} defect images")
+        if hasattr(self, 'defect_masks') and self.defect_masks:
+            self._update_stats_display()
+            
+        self.status_bar.showMessage(f"Loaded {len(self.defect_images)} defect images")
         
     def load_defect_masks(self):
         """Load defect masks from directory"""
@@ -1390,37 +1373,37 @@ class DefectPlacementTool(QMainWindow):
             self.defect_filter.addItem(dtype)
             
         # Update stats
-        self._update_stats()
+        self._update_stats_display()
         
         self.status_bar.showMessage(f"Loaded {len(self.defect_masks)} defect masks")
     
-    def _update_stats(self):
+    def _update_stats_display(self):
         """Update the statistics display"""
-        defect_types = set()
+        target_count = len(self.target_images) if hasattr(self, 'target_images') else 0
+        defect_image_count = len(self.defect_images) if hasattr(self, 'defect_images') else 0
+        defect_mask_count = len(self.defect_masks) if hasattr(self, 'defect_masks') else 0
         
-        # Get defect types from masks if available
-        if self.defect_masks:
-            for mask_path in self.defect_masks:
-                relative_path = os.path.relpath(mask_path, self.defect_masks_dir)
-                defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
-                defect_types.add(defect_type)
-        
-        # Get defect types from images if available
-        if self.defect_images:
+        # Collect all defect types from both images and masks
+        all_types = set()
+        if hasattr(self, 'defect_images') and self.defect_images:
             for img_path in self.defect_images:
                 relative_path = os.path.relpath(img_path, self.defect_images_dir)
                 defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
-                defect_types.add(defect_type)
+                all_types.add(defect_type)
+        if hasattr(self, 'defect_masks') and self.defect_masks:
+            for mask_path in self.defect_masks:
+                relative_path = os.path.relpath(mask_path, self.defect_masks_dir)
+                defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
+                all_types.add(defect_type)
         
-        # Update stats display
-        stats_text = f"Target Images: {len(self.target_images)}\n"
-        if self.defect_images:
-            stats_text += f"Defect Images: {len(self.defect_images)}\n"
-        if self.defect_masks:
-            stats_text += f"Defect Masks: {len(self.defect_masks)}\n"
-        if defect_types:
-            stats_text += f"Types: {', '.join(sorted(defect_types))}"
-        
+        stats_text = f"Target Images: {target_count}\n"
+        stats_text += f"Defect Images: {defect_image_count}\n"
+        stats_text += f"Defect Masks: {defect_mask_count}\n"
+        if all_types:
+            stats_text += f"Types: {', '.join(sorted(all_types))}"
+        else:
+            stats_text += "No defect data loaded"
+            
         self.stats_label.setText(stats_text)
             
     def on_target_selected(self, item):
@@ -1454,19 +1437,61 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load target image:\n{str(e)}")
     
     def _load_image_tensor(self, image_path):
-        """Load and convert image to tensor preserving original aspect ratio"""
+        """Load and convert image to tensor while preserving aspect ratio"""
         image = Image.open(image_path).convert('RGB')
+        
+        # Get original dimensions
+        original_width, original_height = image.size
+        
+        # Calculate new dimensions while preserving aspect ratio
+        # Use a maximum size of 512 pixels for the longer side to keep reasonable memory usage
+        max_size = 512
+        if original_width > original_height:
+            new_width = max_size
+            new_height = int((original_height * max_size) / original_width)
+        else:
+            new_height = max_size
+            new_width = int((original_width * max_size) / original_height)
+        
+        # Ensure minimum size for very small images
+        new_width = max(new_width, 64)
+        new_height = max(new_height, 64)
+        
         transform = transforms.Compose([
+            transforms.Resize((new_height, new_width)),
             transforms.ToTensor()
         ])
         return transform(image)
     
-    def _load_mask_tensor(self, mask_path):
-        """Load and convert mask to tensor preserving original aspect ratio"""
+    def _load_mask_tensor(self, mask_path, target_size=None):
+        """Load and convert mask to tensor, optionally resizing to match target size"""
         mask = Image.open(mask_path).convert('L')
-        transform = transforms.Compose([
-            transforms.ToTensor()
-        ])
+        
+        if target_size is not None:
+            # Resize to match target image size
+            transform = transforms.Compose([
+                transforms.Resize(target_size),
+                transforms.ToTensor()
+            ])
+        else:
+            # Use the same aspect-ratio preserving resize as images
+            original_width, original_height = mask.size
+            max_size = 512
+            if original_width > original_height:
+                new_width = max_size
+                new_height = int((original_height * max_size) / original_width)
+            else:
+                new_height = max_size
+                new_width = int((original_width * max_size) / original_height)
+            
+            new_width = max(new_width, 64)
+            new_height = max(new_height, 64)
+            
+            transform = transforms.Compose([
+                transforms.Resize((new_height, new_width)),
+                transforms.ToTensor()
+            ])
+        
         mask_tensor = transform(mask)
         return (mask_tensor > 0.5).float()
     
@@ -1574,11 +1599,11 @@ class DefectPlacementTool(QMainWindow):
                     continue
             
             try:
-                # Load the mask
-                mask_tensor = self._load_mask_tensor(mask_path)
-                
-                # Load the defect image
+                # Load the defect image first
                 defect_image_tensor = self._load_image_tensor(defect_image_path)
+                
+                # Load the mask with the same size as the defect image
+                mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
                 
                 # Extract only the defect region using the mask
                 defect_tensor = defect_image_tensor * mask_tensor
@@ -1658,10 +1683,7 @@ class DefectPlacementTool(QMainWindow):
         defect_type = item_text.split(" - ")[0]
         
         try:
-            # Load the mask
-            mask_tensor = self._load_mask_tensor(mask_path)
-            
-            # Find the corresponding defect image
+            # Find the corresponding defect image first
             defect_image_path = self._find_corresponding_defect_image(mask_path)
             if not defect_image_path:
                 QMessageBox.warning(self, "Warning", f"No corresponding defect image found for {os.path.basename(mask_path)}")
@@ -1669,6 +1691,9 @@ class DefectPlacementTool(QMainWindow):
                 
             # Load the defect image
             defect_image_tensor = self._load_image_tensor(defect_image_path)
+            
+            # Load the mask with the same size as the defect image
+            mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
             
             # Extract only the defect region using the mask
             # The mask tells us where the defect is in the original image
@@ -2015,27 +2040,39 @@ class DefectPlacementTool(QMainWindow):
     
     def _find_corresponding_defect_image(self, mask_path: str) -> Optional[str]:
         """Find the corresponding defect image for a given mask path by matching filenames"""
-        if not self.defect_images_dir or not self.defect_images:
+        if not self.defect_images_dir or not hasattr(self, 'defect_images') or not self.defect_images:
             return None
             
         # Get the mask filename without extension
         mask_filename = os.path.splitext(os.path.basename(mask_path))[0]
         
-        # Try exact filename match first
+        # Try to find exact filename match first
         for defect_img in self.defect_images:
             defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
-            if mask_filename == defect_filename:
+            if defect_filename == mask_filename:
                 return defect_img
         
-        # Try partial filename matching (in case of slight naming differences)
+        # If no exact match, try partial matching (in case of slight naming differences)
         for defect_img in self.defect_images:
             defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
-            # Check if one filename contains the other (case insensitive)
+            # Check if one filename contains the other (case-insensitive)
             if (mask_filename.lower() in defect_filename.lower() or 
                 defect_filename.lower() in mask_filename.lower()):
                 return defect_img
         
-        # If no match found, return None
+        # If still no match, try to match by defect type directory
+        try:
+            mask_rel_path = os.path.relpath(mask_path, self.defect_masks_dir)
+            mask_parts = mask_rel_path.split(os.sep)
+            if len(mask_parts) >= 2:
+                defect_type = mask_parts[0]
+                # Look for any image in the same defect type directory
+                for defect_img in self.defect_images:
+                    if defect_type in defect_img:
+                        return defect_img
+        except ValueError:
+            pass
+                
         return None
 
     def save_all_augmentations(self):

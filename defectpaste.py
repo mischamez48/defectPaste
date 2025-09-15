@@ -816,48 +816,63 @@ class InteractiveCanvas(QGraphicsView):
         
     def get_augmented_image(self):
         """Generate the final augmented image by rendering the entire scene (WYSIWYG)."""
-        if self.background_tensor is None:
+        if self.background_tensor is None or self.background_item is None:
             return None, None
         
-        # Get the scene's bounding rect to determine the size
-        scene_rect = self.scene.itemsBoundingRect()
-        if scene_rect.isEmpty():
-            return None, None
-            
-        # Prepare base sizes from the background tensor
+        # Get the background image dimensions
         base_h, base_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Render the entire scene to a pixmap
-        scene_pixmap = QPixmap(base_w, base_h)
-        scene_pixmap.fill(Qt.transparent)
+        # Create the final image by compositing all layers manually
+        # Start with the background image
+        result_pixmap = QPixmap(base_w, base_h)
+        result_pixmap.fill(Qt.transparent)
         
-        # Create a painter for the scene
-        scene_painter = QPainter(scene_pixmap)
-        scene_painter.setRenderHint(QPainter.Antialiasing)
+        painter = QPainter(result_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
         
-        # Render the scene
-        self.scene.render(scene_painter, QRectF(0, 0, base_w, base_h), scene_rect)
-        scene_painter.end()
+        # 1. Draw the background image
+        if self.background_item:
+            bg_pixmap = self.background_item.pixmap()
+            painter.drawPixmap(0, 0, bg_pixmap)
         
-        # Convert scene pixmap to QImage
-        scene_image = scene_pixmap.toImage()
+        # 2. Draw the paint layer (if it exists and has content)
+        if self.paint_layer and not self.paint_layer.isNull():
+            painter.drawPixmap(0, 0, self.paint_layer)
+        
+        # 3. Draw all defects
+        for item in self.defect_items:
+            painter.setOpacity(item.opacity)
+            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+        
+        # 4. Draw all regions
+        for item in self.region_items:
+            painter.setOpacity(item.opacity)
+            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+        
+        painter.end()
+        
+        # Convert to QImage
+        result_image = result_pixmap.toImage()
         
         # Convert to RGB format
-        rgb_image = scene_image.convertToFormat(QImage.Format_RGB888)
+        rgb_image = result_image.convertToFormat(QImage.Format_RGB888)
         
-        # Create mask by rendering only the defects and regions
+        # Create mask by compositing all defect and region masks
         mask_img = QImage(base_w, base_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
         mask_painter = QPainter(mask_img)
         mask_painter.setRenderHint(QPainter.Antialiasing)
         
-        # Render only defects and regions for the mask
+        # Draw defect masks
         for item in self.defect_items:
             mask_painter.setOpacity(1.0)
             mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+        
+        # Draw region masks
         for item in self.region_items:
             mask_painter.setOpacity(1.0)
             mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+        
         mask_painter.end()
         
         # Convert to tensors

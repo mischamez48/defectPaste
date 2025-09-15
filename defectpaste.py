@@ -815,55 +815,53 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by painting the scene (WYSIWYG)."""
+        """Generate the final augmented image by rendering the entire scene (WYSIWYG)."""
         if self.background_tensor is None:
             return None, None
-        # Prepare base sizes
+        
+        # Get the scene's bounding rect to determine the size
+        scene_rect = self.scene.itemsBoundingRect()
+        if scene_rect.isEmpty():
+            return None, None
+            
+        # Prepare base sizes from the background tensor
         base_h, base_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Render color image
-        color_img = QImage(base_w, base_h, QImage.Format_RGB888)
-        color_img.fill(QColor(0, 0, 0))
-        painter = QPainter(color_img)
-        # Draw background
-        if self.background_item:
-            painter.setOpacity(1.0)
-            painter.drawPixmap(0, 0, self.background_item.pixmap())
+        # Render the entire scene to a pixmap
+        scene_pixmap = QPixmap(base_w, base_h)
+        scene_pixmap.fill(Qt.transparent)
         
-        # Draw paint layer
-        if self.paint_layer_item:
-            painter.setOpacity(1.0)
-            painter.drawPixmap(0, 0, self.paint_layer_item.pixmap())
+        # Create a painter for the scene
+        scene_painter = QPainter(scene_pixmap)
+        scene_painter.setRenderHint(QPainter.Antialiasing)
         
-        # Draw defects with their current opacity and transformations
-        for item in self.defect_items:
-            painter.setOpacity(float(item.opacity))
-            # Use the already-transformed pixmap that the UI is displaying
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+        # Render the scene
+        self.scene.render(scene_painter, QRectF(0, 0, base_w, base_h), scene_rect)
+        scene_painter.end()
         
-        # Draw regions with their current opacity and transformations
-        for item in self.region_items:
-            painter.setOpacity(float(item.opacity))
-            # Use the already-transformed pixmap that the UI is displaying
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
-        painter.end()
+        # Convert scene pixmap to QImage
+        scene_image = scene_pixmap.toImage()
         
-        # Render mask (grayscale): draw transformed masks in white
+        # Convert to RGB format
+        rgb_image = scene_image.convertToFormat(QImage.Format_RGB888)
+        
+        # Create mask by rendering only the defects and regions
         mask_img = QImage(base_w, base_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
-        mp = QPainter(mask_img)
+        mask_painter = QPainter(mask_img)
+        mask_painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Render only defects and regions for the mask
         for item in self.defect_items:
-            mp.setOpacity(1.0)
-            # Use the already-transformed mask that the UI is using
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+            mask_painter.setOpacity(1.0)
+            mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
         for item in self.region_items:
-            mp.setOpacity(1.0)
-            # Use the already-transformed mask that the UI is using
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
-        mp.end()
+            mask_painter.setOpacity(1.0)
+            mask_painter.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+        mask_painter.end()
         
         # Convert to tensors
-        color_bytes = color_img.bits().asstring(base_w * base_h * 3)
+        color_bytes = rgb_image.bits().asstring(base_w * base_h * 3)
         color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((base_h, base_w, 3)).copy()
         mask_bytes = mask_img.bits().asstring(base_w * base_h)
         mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((base_h, base_w)).copy()

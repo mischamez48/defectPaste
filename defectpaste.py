@@ -1015,11 +1015,11 @@ class DefectPlacementTool(QMainWindow):
         load_targets_action.triggered.connect(self.load_target_images)
         
         # Load defect images directory
-        load_defect_images_action = toolbar.addAction("Load Defect Images")
+        load_defect_images_action = toolbar.addAction("Load Defect Images Folder")
         load_defect_images_action.triggered.connect(self.load_defect_images)
         
         # Load defect masks directory
-        load_defect_masks_action = toolbar.addAction("Load Defect Masks")
+        load_defect_masks_action = toolbar.addAction("Load Defect Masks Folder")
         load_defect_masks_action.triggered.connect(self.load_defect_masks)
         
         toolbar.addSeparator()
@@ -1318,7 +1318,11 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.warning(self, "Warning", "No defect image files found in the selected directory.")
             return
             
-        self.status_bar.showMessage(f"Loaded {len(self.defect_images)} defect images")
+        # Update stats if masks are also loaded
+        if self.defect_masks:
+            self._update_stats()
+        else:
+            self.status_bar.showMessage(f"Loaded {len(self.defect_images)} defect images")
         
     def load_defect_masks(self):
         """Load defect masks from directory"""
@@ -1369,13 +1373,38 @@ class DefectPlacementTool(QMainWindow):
             self.defect_filter.addItem(dtype)
             
         # Update stats
-        self.stats_label.setText(
-            f"Target Images: {len(self.target_images)}\n"
-            f"Defect Masks: {len(self.defect_masks)}\n"
-            f"Types: {', '.join(defect_types)}"
-        )
+        self._update_stats()
         
         self.status_bar.showMessage(f"Loaded {len(self.defect_masks)} defect masks")
+    
+    def _update_stats(self):
+        """Update the statistics display"""
+        defect_types = set()
+        
+        # Get defect types from masks if available
+        if self.defect_masks:
+            for mask_path in self.defect_masks:
+                relative_path = os.path.relpath(mask_path, self.defect_masks_dir)
+                defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
+                defect_types.add(defect_type)
+        
+        # Get defect types from images if available
+        if self.defect_images:
+            for img_path in self.defect_images:
+                relative_path = os.path.relpath(img_path, self.defect_images_dir)
+                defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
+                defect_types.add(defect_type)
+        
+        # Update stats display
+        stats_text = f"Target Images: {len(self.target_images)}\n"
+        if self.defect_images:
+            stats_text += f"Defect Images: {len(self.defect_images)}\n"
+        if self.defect_masks:
+            stats_text += f"Defect Masks: {len(self.defect_masks)}\n"
+        if defect_types:
+            stats_text += f"Types: {', '.join(sorted(defect_types))}"
+        
+        self.stats_label.setText(stats_text)
             
     def on_target_selected(self, item):
         """Handle target image selection"""
@@ -1408,19 +1437,17 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load target image:\n{str(e)}")
     
     def _load_image_tensor(self, image_path):
-        """Load and convert image to tensor"""
+        """Load and convert image to tensor preserving original aspect ratio"""
         image = Image.open(image_path).convert('RGB')
         transform = transforms.Compose([
-            transforms.Resize((256, 256)),
             transforms.ToTensor()
         ])
         return transform(image)
     
     def _load_mask_tensor(self, mask_path):
-        """Load and convert mask to tensor"""
+        """Load and convert mask to tensor preserving original aspect ratio"""
         mask = Image.open(mask_path).convert('L')
         transform = transforms.Compose([
-            transforms.Resize((256, 256)),
             transforms.ToTensor()
         ])
         mask_tensor = transform(mask)
@@ -1970,46 +1997,28 @@ class DefectPlacementTool(QMainWindow):
             return None
     
     def _find_corresponding_defect_image(self, mask_path: str) -> Optional[str]:
-        """Find the corresponding defect image for a given mask path"""
-        if not self.defect_images_dir or not self.defect_masks_dir:
+        """Find the corresponding defect image for a given mask path by matching filenames"""
+        if not self.defect_images_dir or not self.defect_images:
             return None
             
-        # Get the relative path of the mask within the masks directory
-        try:
-            mask_rel_path = os.path.relpath(mask_path, self.defect_masks_dir)
-        except ValueError:
-            return None
-            
-        # Extract the defect type from the mask path (e.g., "broken_large" from "broken_large/...")
-        mask_parts = mask_rel_path.split(os.sep)
-        if len(mask_parts) < 2:
-            return None
-        defect_type = mask_parts[0]  # This should be "broken_large", "broken_small", etc.
-        
         # Get the mask filename without extension
         mask_filename = os.path.splitext(os.path.basename(mask_path))[0]
         
-        # Look for a corresponding image in the defect images directory
-        # First try exact path matching - construct the same relative path in defect images
-        defect_image_path = os.path.join(self.defect_images_dir, mask_rel_path)
-        if os.path.exists(defect_image_path):
-            return defect_image_path
-            
-        # If not found, try to find by filename matching within the defect type directory
-        defect_type_dir = os.path.join(self.defect_images_dir, defect_type)
-        if os.path.exists(defect_type_dir):
-            for defect_img in self.defect_images:
-                if defect_type in defect_img:
-                    defect_name = os.path.splitext(os.path.basename(defect_img))[0]
-                    # Try to match the base filename (without extensions)
-                    if mask_filename in defect_name or defect_name in mask_filename:
-                        return defect_img
-                        
-        # Last resort: try to find any image in the defect type directory
+        # Try exact filename match first
         for defect_img in self.defect_images:
-            if defect_type in defect_img:
+            defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
+            if mask_filename == defect_filename:
                 return defect_img
-                
+        
+        # Try partial filename matching (in case of slight naming differences)
+        for defect_img in self.defect_images:
+            defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
+            # Check if one filename contains the other (case insensitive)
+            if (mask_filename.lower() in defect_filename.lower() or 
+                defect_filename.lower() in mask_filename.lower()):
+                return defect_img
+        
+        # If no match found, return None
         return None
 
     def save_all_augmentations(self):

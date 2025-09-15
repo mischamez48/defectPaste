@@ -835,15 +835,29 @@ class InteractiveCanvas(QGraphicsView):
             painter.setOpacity(1.0)
             painter.drawPixmap(0, 0, self.paint_layer_item.pixmap())
         
-        # Draw defects with their current opacity
+        # Draw defects with their current opacity and transformations
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+            # Apply transformations in the same order as the UI (scale then rotate)
+            painter.save()
+            painter.translate(item.x() + item.pixmap().width()/2, item.y() + item.pixmap().height()/2)
+            painter.scale(item.scale_factor, item.scale_factor)
+            painter.rotate(item.rotation_angle)
+            painter.translate(-item.pixmap().width()/2, -item.pixmap().height()/2)
+            painter.drawPixmap(0, 0, item.pixmap())
+            painter.restore()
         
-        # Draw regions with their current opacity
+        # Draw regions with their current opacity and transformations
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+            # Apply transformations in the same order as the UI (scale then rotate)
+            painter.save()
+            painter.translate(item.x() + item.pixmap().width()/2, item.y() + item.pixmap().height()/2)
+            painter.scale(item.scale_factor, item.scale_factor)
+            painter.rotate(item.rotation_angle)
+            painter.translate(-item.pixmap().width()/2, -item.pixmap().height()/2)
+            painter.drawPixmap(0, 0, item.pixmap())
+            painter.restore()
         painter.end()
         
         # Render mask (grayscale): draw transformed masks in white
@@ -852,10 +866,24 @@ class InteractiveCanvas(QGraphicsView):
         mp = QPainter(mask_img)
         for item in self.defect_items:
             mp.setOpacity(1.0)
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+            # Apply transformations to mask in the same order as the UI (scale then rotate)
+            mp.save()
+            mp.translate(item.x() + item.mask_pixmap.width()/2, item.y() + item.mask_pixmap.height()/2)
+            mp.scale(item.scale_factor, item.scale_factor)
+            mp.rotate(item.rotation_angle)
+            mp.translate(-item.mask_pixmap.width()/2, -item.mask_pixmap.height()/2)
+            mp.drawPixmap(0, 0, item.mask_pixmap)
+            mp.restore()
         for item in self.region_items:
             mp.setOpacity(1.0)
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+            # Apply transformations to mask in the same order as the UI (scale then rotate)
+            mp.save()
+            mp.translate(item.x() + item.mask_pixmap.width()/2, item.y() + item.mask_pixmap.height()/2)
+            mp.scale(item.scale_factor, item.scale_factor)
+            mp.rotate(item.rotation_angle)
+            mp.translate(-item.mask_pixmap.width()/2, -item.mask_pixmap.height()/2)
+            mp.drawPixmap(0, 0, item.mask_pixmap)
+            mp.restore()
         mp.end()
         
         # Convert to tensors

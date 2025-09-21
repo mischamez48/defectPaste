@@ -32,10 +32,11 @@ import random
 class DefectItem(QGraphicsPixmapItem):
     """Draggable defect item on the canvas"""
     
-    def __init__(self, pixmap, mask_pixmap, defect_data, parent=None):
+    def __init__(self, pixmap, mask_pixmap, defect_data, exclude_masks=False, parent=None):
         super().__init__(pixmap)
         self.mask_pixmap = mask_pixmap
         self.defect_data = defect_data
+        self.exclude_masks = exclude_masks  # Store the exclude_masks state when created
         self.setFlags(
             QGraphicsPixmapItem.ItemIsMovable |
             QGraphicsPixmapItem.ItemIsSelectable |
@@ -75,10 +76,11 @@ class DefectItem(QGraphicsPixmapItem):
 class SelectedRegionItem(QGraphicsPixmapItem):
     """Draggable selected region item on the canvas"""
     
-    def __init__(self, pixmap, mask_pixmap, region_data, parent=None):
+    def __init__(self, pixmap, mask_pixmap, region_data, exclude_masks=False, parent=None):
         super().__init__(pixmap)
         self.mask_pixmap = mask_pixmap
         self.region_data = region_data
+        self.exclude_masks = exclude_masks  # Store the exclude_masks state when created
         self.setFlags(
             QGraphicsPixmapItem.ItemIsMovable |
             QGraphicsPixmapItem.ItemIsSelectable |
@@ -122,8 +124,9 @@ class InteractiveCanvas(QGraphicsView):
     paint_changed = pyqtSignal()
     region_placed = pyqtSignal(dict)
     
-    def __init__(self):
+    def __init__(self, main_window=None):
         super().__init__()
+        self.main_window = main_window  # Reference to main window to access exclude_masks state
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         self.scene.selectionChanged.connect(self.on_selection_changed)
@@ -131,6 +134,7 @@ class InteractiveCanvas(QGraphicsView):
         # Background image
         self.background_item = None
         self.background_tensor = None
+        self.original_background_tensor = None  # Store original size image
         
         # Defect items
         self.defect_items = []
@@ -173,9 +177,10 @@ class InteractiveCanvas(QGraphicsView):
         
         # [Removed] Object mask functionality
         
-    def set_background_image(self, image_tensor):
+    def set_background_image(self, image_tensor, original_tensor=None):
         """Set the background image"""
         self.background_tensor = image_tensor
+        self.original_background_tensor = original_tensor if original_tensor is not None else image_tensor
         
         # Convert tensor to QPixmap
         image_np = image_tensor.permute(1, 2, 0).numpy()
@@ -209,7 +214,7 @@ class InteractiveCanvas(QGraphicsView):
         
     # [Removed] Object mask overlay methods
             
-    def add_defect(self, defect_tensor, mask_tensor, defect_info, position: Optional[Tuple[int, int]] = None, opacity_override: Optional[float] = None):
+    def add_defect(self, defect_tensor, mask_tensor, defect_info, position: Optional[Tuple[int, int]] = None, opacity_override: Optional[float] = None, exclude_masks: bool = False):
         """Add a defect to the canvas.
         Optionally provide a top-left position (x,y) and opacity to place without recentering.
         """
@@ -234,7 +239,7 @@ class InteractiveCanvas(QGraphicsView):
         mask_pixmap = QPixmap.fromImage(mask_qimage)
         
         # Create defect item
-        defect_item = DefectItem(pixmap, mask_pixmap, defect_info)
+        defect_item = DefectItem(pixmap, mask_pixmap, defect_info, exclude_masks)
         
         # Position
         if position is not None:
@@ -532,7 +537,8 @@ class InteractiveCanvas(QGraphicsView):
             self.selection_item = None
             
             # Automatically create draggable region
-            self.create_region_from_selection(x, y, w, h, bg_rect)
+            exclude_masks = self.main_window.exclude_mask_cb.isChecked() if self.main_window else False
+            self.create_region_from_selection(x, y, w, h, bg_rect, exclude_masks)
         else:
             # Remove selection rectangle if too small
             self.scene.removeItem(self.selection_item)
@@ -571,14 +577,15 @@ class InteractiveCanvas(QGraphicsView):
             self.freehand_item = None
             
             # Create region from freehand selection
-            self.create_region_from_freehand_selection(x, y, w, h, bg_rect)
+            exclude_masks = self.main_window.exclude_mask_cb.isChecked() if self.main_window else False
+            self.create_region_from_freehand_selection(x, y, w, h, bg_rect, exclude_masks)
         else:
             # Remove freehand path if too small
             self.scene.removeItem(self.freehand_item)
             self.freehand_item = None
             self.region_placed.emit({'has_selection': False})
     
-    def create_region_from_selection(self, x, y, w, h, bg_rect):
+    def create_region_from_selection(self, x, y, w, h, bg_rect, exclude_masks=False):
         """Create a draggable region from selection coordinates"""
         # Extract the selected region from the background image
         region_pixmap = self.background_item.pixmap().copy(x, y, w, h)
@@ -595,7 +602,7 @@ class InteractiveCanvas(QGraphicsView):
         }
         
         # Create region item
-        region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data)
+        region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data, exclude_masks)
         
         # Position at center of canvas
         canvas_center_x = bg_rect.width() / 2 - w / 2
@@ -613,7 +620,7 @@ class InteractiveCanvas(QGraphicsView):
             'position': (region_item.x(), region_item.y())
         })
     
-    def create_region_from_freehand_selection(self, x, y, w, h, bg_rect):
+    def create_region_from_freehand_selection(self, x, y, w, h, bg_rect, exclude_masks=False):
         """Create a draggable region from freehand selection"""
         # Extract the background region
         background_region = self.background_item.pixmap().copy(x, y, w, h)
@@ -683,7 +690,7 @@ class InteractiveCanvas(QGraphicsView):
         }
         
         # Create region item
-        region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data)
+        region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data, exclude_masks)
         
         # Position at center of canvas
         canvas_center_x = bg_rect.width() / 2 - w / 2
@@ -815,54 +822,108 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by painting the scene (WYSIWYG)."""
-        if self.background_tensor is None:
+        """Generate the final augmented image by painting the scene at original resolution."""
+        if self.background_tensor is None or self.original_background_tensor is None:
             return None, None
-        # Prepare base sizes
-        base_h, base_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Render color image
-        color_img = QImage(base_w, base_h, QImage.Format_RGB888)
+        # Use original image dimensions
+        orig_h, orig_w = self.original_background_tensor.shape[1], self.original_background_tensor.shape[2]
+        display_h, display_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
+        
+        # Calculate scaling factors
+        scale_x = orig_w / display_w
+        scale_y = orig_h / display_h
+        
+        # Render color image at original size
+        color_img = QImage(orig_w, orig_h, QImage.Format_RGB888)
         color_img.fill(QColor(0, 0, 0))
         painter = QPainter(color_img)
-        # Draw background
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # Draw background at original size
         if self.background_item:
             painter.setOpacity(1.0)
-            painter.drawPixmap(0, 0, self.background_item.pixmap())
+            # Scale the background pixmap to original size
+            bg_pixmap = self.background_item.pixmap()
+            scaled_bg = bg_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(0, 0, scaled_bg)
         
-        # Draw paint layer
+        # Draw paint layer at original size
         if self.paint_layer_item:
             painter.setOpacity(1.0)
-            painter.drawPixmap(0, 0, self.paint_layer_item.pixmap())
+            paint_pixmap = self.paint_layer_item.pixmap()
+            scaled_paint = paint_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter.drawPixmap(0, 0, scaled_paint)
         
-        # Draw defects with their current opacity
+        # Draw defects with their current opacity, scaled to original size
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+            # Scale position and size
+            x = int(item.x() * scale_x)
+            y = int(item.y() * scale_y)
+            # Scale the pixmap
+            scaled_pixmap = item.pixmap().scaled(
+                int(item.pixmap().width() * scale_x),
+                int(item.pixmap().height() * scale_y),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            painter.drawPixmap(x, y, scaled_pixmap)
         
-        # Draw regions with their current opacity
+        # Draw regions with their current opacity, scaled to original size
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            painter.drawPixmap(int(item.x()), int(item.y()), item.pixmap())
+            # Scale position and size
+            x = int(item.x() * scale_x)
+            y = int(item.y() * scale_y)
+            # Scale the pixmap
+            scaled_pixmap = item.pixmap().scaled(
+                int(item.pixmap().width() * scale_x),
+                int(item.pixmap().height() * scale_y),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            painter.drawPixmap(x, y, scaled_pixmap)
         painter.end()
         
-        # Render mask (grayscale): draw transformed masks in white
-        mask_img = QImage(base_w, base_h, QImage.Format_Grayscale8)
+        # Render mask (grayscale) at original size
+        mask_img = QImage(orig_w, orig_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
+        
+        # Only draw masks for items that were not created in exclude_masks mode
         mp = QPainter(mask_img)
+        mp.setRenderHint(QPainter.SmoothPixmapTransform)
         for item in self.defect_items:
-            mp.setOpacity(1.0)
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+            if not item.exclude_masks:
+                mp.setOpacity(1.0)
+                # Scale position and size
+                x = int(item.x() * scale_x)
+                y = int(item.y() * scale_y)
+                # Scale the mask pixmap
+                scaled_mask = item.mask_pixmap.scaled(
+                    int(item.mask_pixmap.width() * scale_x),
+                    int(item.mask_pixmap.height() * scale_y),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                mp.drawPixmap(x, y, scaled_mask)
         for item in self.region_items:
-            mp.setOpacity(1.0)
-            mp.drawPixmap(int(item.x()), int(item.y()), item.mask_pixmap)
+            if not item.exclude_masks:
+                mp.setOpacity(1.0)
+                # Scale position and size
+                x = int(item.x() * scale_x)
+                y = int(item.y() * scale_y)
+                # Scale the mask pixmap
+                scaled_mask = item.mask_pixmap.scaled(
+                    int(item.mask_pixmap.width() * scale_x),
+                    int(item.mask_pixmap.height() * scale_y),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                mp.drawPixmap(x, y, scaled_mask)
         mp.end()
         
         # Convert to tensors
-        color_bytes = color_img.bits().asstring(base_w * base_h * 3)
-        color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((base_h, base_w, 3)).copy()
-        mask_bytes = mask_img.bits().asstring(base_w * base_h)
-        mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((base_h, base_w)).copy()
+        color_bytes = color_img.bits().asstring(orig_w * orig_h * 3)
+        color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((orig_h, orig_w, 3)).copy()
+        mask_bytes = mask_img.bits().asstring(orig_w * orig_h)
+        mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((orig_h, orig_w)).copy()
         
         color_tensor = torch.from_numpy(color_np).float().permute(2, 0, 1) / 255.0
         mask_tensor = torch.from_numpy(mask_np).float().unsqueeze(0) / 255.0
@@ -978,7 +1039,7 @@ class DefectPlacementTool(QMainWindow):
         left_scroll.setMinimumWidth(350)
         
         # Center - Canvas
-        self.canvas = InteractiveCanvas()
+        self.canvas = InteractiveCanvas(self)
         self.canvas.defect_placed.connect(self.on_defect_placed)
         self.canvas.region_placed.connect(self.on_region_placed)
         self.canvas.paint_changed.connect(self._mark_unsaved)
@@ -1132,6 +1193,11 @@ class DefectPlacementTool(QMainWindow):
         self.clear_selection_btn = QPushButton("Clear Selection")
         self.clear_selection_btn.clicked.connect(self.clear_selection)
         selection_layout.addWidget(self.clear_selection_btn)
+        
+        # Exclude mask checkbox
+        self.exclude_mask_cb = QCheckBox("Exclude masks from output")
+        self.exclude_mask_cb.setToolTip("When checked, masks will not be saved to JSON file or binary image output")
+        selection_layout.addWidget(self.exclude_mask_cb)
         
         selection_group.setLayout(selection_layout)
         layout.addWidget(selection_group)
@@ -1424,8 +1490,8 @@ class DefectPlacementTool(QMainWindow):
             self.current_image_path = image_path
             
             # Load and display the image
-            image_tensor = self._load_image_tensor(image_path)
-            self.canvas.set_background_image(image_tensor)
+            resized_tensor, original_tensor = self._load_image_tensor(image_path)
+            self.canvas.set_background_image(resized_tensor, original_tensor)
             
             # Restore cached defects for this image, if any
             self.restore_state_from_cache()
@@ -1457,11 +1523,20 @@ class DefectPlacementTool(QMainWindow):
         new_width = max(new_width, 64)
         new_height = max(new_height, 64)
         
-        transform = transforms.Compose([
+        # Create original size tensor
+        original_transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+        original_tensor = original_transform(image)
+        
+        # Create resized tensor for display
+        resize_transform = transforms.Compose([
             transforms.Resize((new_height, new_width)),
             transforms.ToTensor()
         ])
-        return transform(image)
+        resized_tensor = resize_transform(image)
+        
+        return resized_tensor, original_tensor
     
     def _load_mask_tensor(self, mask_path, target_size=None):
         """Load and convert mask to tensor, optionally resizing to match target size"""
@@ -1512,6 +1587,7 @@ class DefectPlacementTool(QMainWindow):
                 'scale': float(item.scale_factor),
                 'rotation': float(item.rotation_angle),
                 'opacity': float(item.opacity),
+                'exclude_masks': item.exclude_masks,
             })
         
         regions_state = []
@@ -1525,6 +1601,7 @@ class DefectPlacementTool(QMainWindow):
                 'scale': float(item.scale_factor),
                 'rotation': float(item.rotation_angle),
                 'opacity': float(item.opacity),
+                'exclude_masks': item.exclude_masks,
             })
         
         # Save paint layer if it exists and has content
@@ -1600,7 +1677,7 @@ class DefectPlacementTool(QMainWindow):
             
             try:
                 # Load the defect image first
-                defect_image_tensor = self._load_image_tensor(defect_image_path)
+                defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
                 
                 # Load the mask with the same size as the defect image
                 mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
@@ -1621,7 +1698,8 @@ class DefectPlacementTool(QMainWindow):
                         'defect_image_path': defect_image_path
                     },
                     position=(entry['x'], entry['y']),
-                    opacity_override=entry['opacity']
+                    opacity_override=entry['opacity'],
+                    exclude_masks=entry.get('exclude_masks', False)
                 )
                 # Apply transform parameters
                 self.canvas.selected_defect.update_transform(entry['scale'], entry['rotation'], entry['opacity'])
@@ -1654,7 +1732,8 @@ class DefectPlacementTool(QMainWindow):
                             'type': entry['type'],
                             'source': entry.get('source', 'unknown'),
                             'original_rect': original_rect
-                        }
+                        },
+                        exclude_masks=entry.get('exclude_masks', False)
                     )
                     
                     # Set position and add to scene
@@ -1690,7 +1769,7 @@ class DefectPlacementTool(QMainWindow):
                 return
                 
             # Load the defect image
-            defect_image_tensor = self._load_image_tensor(defect_image_path)
+            defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
             
             # Load the mask with the same size as the defect image
             mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
@@ -1704,6 +1783,7 @@ class DefectPlacementTool(QMainWindow):
             defect_tensor, mask_tensor = self._crop_to_defect_bounding_box(defect_tensor, mask_tensor)
             
             # Add to canvas
+            exclude_masks = self.exclude_mask_cb.isChecked()
             self.canvas.add_defect(
                 defect_tensor,
                 mask_tensor,
@@ -1712,7 +1792,8 @@ class DefectPlacementTool(QMainWindow):
                     'source': os.path.basename(mask_path),
                     'mask_path': mask_path,
                     'defect_image_path': defect_image_path
-                }
+                },
+                exclude_masks=exclude_masks
             )
             
             # Reset transformation controls to defaults for the new defect
@@ -1949,6 +2030,11 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.information(self, "Info", "No defects placed yet")
             return
             
+        # Check if any items have exclude_masks set to True
+        has_excluded_masks = any(item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
+        # Check if any items were created in normal mode (don't exclude masks)
+        has_normal_mode_items = any(not item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
+            
         # Get save path
         save_path, _ = QFileDialog.getSaveFileName(
             self, "Save Augmented Image", os.getcwd(), "PNG Files (*.png)"
@@ -1959,36 +2045,38 @@ class DefectPlacementTool(QMainWindow):
             image_pil = TF.to_pil_image(result_image)
             image_pil.save(save_path)
             
-            # Save mask
-            mask_path = save_path.replace('.png', '_mask.png')
-            mask_pil = TF.to_pil_image(result_mask)
-            mask_pil.save(mask_path)
+            # Save mask only if there are items that were created in normal mode
+            if has_normal_mode_items:
+                mask_path = save_path.replace('.png', '_mask.png')
+                mask_pil = TF.to_pil_image(result_mask)
+                mask_pil.save(mask_path)
             
             # Save metadata
             metadata = {
                 'target_image': os.path.basename(self.current_image_path),
                 'target_image_path': self.current_image_path,
+                'has_excluded_masks': has_excluded_masks,
                 'defects': [
                     {
-                        'type': item.defect_data.get('type', 'unknown'),
+                        'label': item.defect_data.get('type', 'unknown'),
                         'position': item.get_position(),
                         'scale': item.scale_factor,
                         'rotation': item.rotation_angle,
                         'opacity': item.opacity,
-                        'mask_path': item.defect_data.get('mask_path'),
-                        'defect_image_path': item.defect_data.get('defect_image_path')
+                        'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
+                        'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
                     }
                     for item in self.canvas.defect_items
                 ],
                 'regions': [
                     {
-                        'type': item.region_data.get('type', 'selected_region'),
+                        'label': 'selection_label',
                         'position': item.get_position(),
                         'scale': item.scale_factor,
                         'rotation': item.rotation_angle,
                         'opacity': item.opacity,
-                        'original_rect': item.region_data.get('original_rect'),
-                        'source': item.region_data.get('source', 'unknown')
+                        'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
+                        'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
                     }
                     for item in self.canvas.region_items
                 ]
@@ -2004,7 +2092,14 @@ class DefectPlacementTool(QMainWindow):
                 self.has_unsaved_changes = False
                 self._update_window_title()
             
-            self.status_bar.showMessage(f"Saved to: {save_path}")
+            status_msg = f"Saved to: {save_path}"
+            if has_excluded_masks and has_normal_mode_items:
+                status_msg += " (mixed: some masks excluded, some included)"
+            elif has_excluded_masks:
+                status_msg += " (all masks excluded)"
+            elif has_normal_mode_items:
+                status_msg += " (masks included)"
+            self.status_bar.showMessage(status_msg)
             QMessageBox.information(self, "Success", "Augmented image saved successfully!")
     
     def _find_next_index(self, directory: str, base_name: str) -> int:
@@ -2105,48 +2200,59 @@ class DefectPlacementTool(QMainWindow):
                 continue
             # Load target image
             self.current_image_path = key
-            image_tensor = self._load_image_tensor(key)
-            self.canvas.set_background_image(image_tensor)
+            resized_tensor, original_tensor = self._load_image_tensor(key)
+            self.canvas.set_background_image(resized_tensor, original_tensor)
             # Restore this image's state
             self.restore_state_from_cache()
             # Render
             result_image, result_mask = self.canvas.get_augmented_image()
             if result_image is None:
                 continue
+            
+            # Check if any items have exclude_masks set to True
+            has_excluded_masks = any(item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
+            # Check if any items were created in normal mode (don't exclude masks)
+            has_normal_mode_items = any(not item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
+            
             # Save files
             img_filename = f"{base_name}_{current_idx}.png"
-            mask_filename = f"{base_name}_{current_idx}_mask.png"
             img_path = os.path.join(output_dir, img_filename)
-            mask_path = os.path.join(output_dir, mask_filename)
             image_pil = TF.to_pil_image(result_image)
             image_pil.save(img_path)
-            mask_pil = TF.to_pil_image(result_mask)
-            mask_pil.save(mask_path)
+            
+            # Save mask only if there are items that were created in normal mode
+            if has_normal_mode_items:
+                mask_filename = f"{base_name}_{current_idx}_mask.png"
+                mask_path = os.path.join(output_dir, mask_filename)
+                mask_pil = TF.to_pil_image(result_mask)
+                mask_pil.save(mask_path)
+            
             # Save metadata
             metadata = {
                 'target_image': os.path.basename(key),
                 'target_image_path': key,
+                'has_excluded_masks': has_excluded_masks,
                 'defects': [
                     {
-                        'type': item.defect_data.get('type', 'unknown'),
+                        'label': item.defect_data.get('type', 'unknown'),
                         'position': item.get_position(),
                         'scale': item.scale_factor,
                         'rotation': item.rotation_angle,
                         'opacity': item.opacity,
-                        'mask_path': item.defect_data.get('mask_path'),
-                        'defect_image_path': item.defect_data.get('defect_image_path')
+                        'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
+                        'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
                     }
                     for item in self.canvas.defect_items
                 ],
                 'regions': [
                     {
-                        'type': item.region_data.get('type', 'selected_region'),
+                        'label': 'selection_label',
                         'position': item.get_position(),
                         'scale': item.scale_factor,
                         'rotation': item.rotation_angle,
                         'opacity': item.opacity,
-                        'original_rect': item.region_data.get('original_rect'),
-                        'source': item.region_data.get('source', 'unknown')
+                        'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
+                        'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
                     }
                     for item in self.canvas.region_items
                 ]

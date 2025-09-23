@@ -822,70 +822,55 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by painting the scene at original resolution."""
+        """Generate the final augmented image by painting the scene at scaled resolution."""
         if self.background_tensor is None or self.original_background_tensor is None:
             return None, None
         
-        # Use original image dimensions
-        orig_h, orig_w = self.original_background_tensor.shape[1], self.original_background_tensor.shape[2]
+        # Use scaled image dimensions (75% of original)
         display_h, display_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Calculate scaling factors
-        scale_x = orig_w / display_w
-        scale_y = orig_h / display_h
+        # No scaling needed - use display dimensions directly
+        scale_x = 1.0
+        scale_y = 1.0
         
-        # Render color image at original size
-        color_img = QImage(orig_w, orig_h, QImage.Format_RGB888)
+        # Render color image at scaled size
+        color_img = QImage(display_w, display_h, QImage.Format_RGB888)
         color_img.fill(QColor(0, 0, 0))
         painter = QPainter(color_img)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         
-        # Draw background at original size
+        # Draw background at scaled size
         if self.background_item:
             painter.setOpacity(1.0)
-            # Scale the background pixmap to original size
+            # Use background pixmap directly (already at correct size)
             bg_pixmap = self.background_item.pixmap()
-            scaled_bg = bg_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_bg)
+            painter.drawPixmap(0, 0, bg_pixmap)
         
-        # Draw paint layer at original size
+        # Draw paint layer at scaled size
         if self.paint_layer_item:
             painter.setOpacity(1.0)
             paint_pixmap = self.paint_layer_item.pixmap()
-            scaled_paint = paint_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_paint)
+            painter.drawPixmap(0, 0, paint_pixmap)
         
-        # Draw defects with their current opacity, scaled to original size
+        # Draw defects with their current opacity at scaled size
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            # Use position and size directly (already at correct scale)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         
-        # Draw regions with their current opacity, scaled to original size
+        # Draw regions with their current opacity at scaled size
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            # Use position and size directly (already at correct scale)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         painter.end()
         
-        # Render mask (grayscale) at original size
-        mask_img = QImage(orig_w, orig_h, QImage.Format_Grayscale8)
+        # Render mask (grayscale) at scaled size
+        mask_img = QImage(display_w, display_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
         
         # Only draw masks for items that were not created in exclude_masks mode
@@ -894,36 +879,24 @@ class InteractiveCanvas(QGraphicsView):
         for item in self.defect_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                # Use position and size directly (already at correct scale)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         for item in self.region_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                # Use position and size directly (already at correct scale)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         mp.end()
         
         # Convert to tensors
-        color_bytes = color_img.bits().asstring(orig_w * orig_h * 3)
-        color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((orig_h, orig_w, 3)).copy()
-        mask_bytes = mask_img.bits().asstring(orig_w * orig_h)
-        mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((orig_h, orig_w)).copy()
+        color_bytes = color_img.bits().asstring(display_w * display_h * 3)
+        color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((display_h, display_w, 3)).copy()
+        mask_bytes = mask_img.bits().asstring(display_w * display_h)
+        mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((display_h, display_w)).copy()
         
         color_tensor = torch.from_numpy(color_np).float().permute(2, 0, 1) / 255.0
         mask_tensor = torch.from_numpy(mask_np).float().unsqueeze(0) / 255.0
@@ -1510,14 +1483,10 @@ class DefectPlacementTool(QMainWindow):
         original_width, original_height = image.size
         
         # Calculate new dimensions while preserving aspect ratio
-        # Use a maximum size of 512 pixels for the longer side to keep reasonable memory usage
-        max_size = 512
-        if original_width > original_height:
-            new_width = max_size
-            new_height = int((original_height * max_size) / original_width)
-        else:
-            new_height = max_size
-            new_width = int((original_width * max_size) / original_height)
+        # Scale to 75% of original size
+        scale_factor = 0.75
+        new_width = int(original_width * scale_factor)
+        new_height = int(original_height * scale_factor)
         
         # Ensure minimum size for very small images
         new_width = max(new_width, 64)
@@ -1551,13 +1520,10 @@ class DefectPlacementTool(QMainWindow):
         else:
             # Use the same aspect-ratio preserving resize as images
             original_width, original_height = mask.size
-            max_size = 512
-            if original_width > original_height:
-                new_width = max_size
-                new_height = int((original_height * max_size) / original_width)
-            else:
-                new_height = max_size
-                new_width = int((original_width * max_size) / original_height)
+            # Scale to 75% of original size
+            scale_factor = 0.75
+            new_width = int(original_width * scale_factor)
+            new_height = int(original_height * scale_factor)
             
             new_width = max(new_width, 64)
             new_height = max(new_height, 64)

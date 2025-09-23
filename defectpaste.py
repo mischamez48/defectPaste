@@ -209,8 +209,8 @@ class InteractiveCanvas(QGraphicsView):
         self.paint_layer_item = self.scene.addPixmap(self.paint_layer)
         self.paint_layer_item.setZValue(1)  # Above background, below defects
         
-        # Fit in view
-        self.fitInView(self.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
+        # Fit in view - use IgnoreAspectRatio to match the actual image dimensions
+        self.fitInView(self.scene.itemsBoundingRect(), Qt.IgnoreAspectRatio)
         
     # [Removed] Object mask overlay methods
             

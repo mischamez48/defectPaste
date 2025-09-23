@@ -822,69 +822,47 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by painting the scene at original resolution."""
-        if self.background_tensor is None or self.original_background_tensor is None:
+        """Generate the final augmented image at 50% resolution (no scaling needed)."""
+        if self.background_tensor is None:
             return None, None
         
-        # Use original image dimensions
-        orig_h, orig_w = self.original_background_tensor.shape[1], self.original_background_tensor.shape[2]
-        display_h, display_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
+        # Use the actual dimensions of the loaded image (which is now 50% resolution)
+        orig_h, orig_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
-        # Calculate scaling factors
-        scale_x = orig_w / display_w
-        scale_y = orig_h / display_h
-        
-        # Render color image at original size
+        # Render color image at 50% resolution (no scaling needed)
         color_img = QImage(orig_w, orig_h, QImage.Format_RGB888)
         color_img.fill(QColor(0, 0, 0))
         painter = QPainter(color_img)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         
-        # Draw background at original size
+        # Draw background at 50% resolution
         if self.background_item:
             painter.setOpacity(1.0)
-            # Scale the background pixmap to original size - use IgnoreAspectRatio to fill entire canvas
             bg_pixmap = self.background_item.pixmap()
-            scaled_bg = bg_pixmap.scaled(orig_w, orig_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_bg)
+            painter.drawPixmap(0, 0, bg_pixmap)
         
-        # Draw paint layer at original size
+        # Draw paint layer at 50% resolution
         if self.paint_layer_item:
             painter.setOpacity(1.0)
             paint_pixmap = self.paint_layer_item.pixmap()
-            scaled_paint = paint_pixmap.scaled(orig_w, orig_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_paint)
+            painter.drawPixmap(0, 0, paint_pixmap)
         
-        # Draw defects with their current opacity, scaled to original size
+        # Draw defects with their current opacity at 50% resolution
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         
-        # Draw regions with their current opacity, scaled to original size
+        # Draw regions with their current opacity at 50% resolution
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         painter.end()
         
-        # Render mask (grayscale) at original size
+        # Render mask (grayscale) at 50% resolution
         mask_img = QImage(orig_w, orig_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
         
@@ -894,29 +872,15 @@ class InteractiveCanvas(QGraphicsView):
         for item in self.defect_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         for item in self.region_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         mp.end()
         
         # Convert to tensors
@@ -1503,40 +1467,29 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load target image:\n{str(e)}")
     
     def _load_image_tensor(self, image_path):
-        """Load and convert image to tensor while preserving aspect ratio"""
+        """Load and convert image to tensor at 50% of original resolution"""
         image = Image.open(image_path).convert('RGB')
         
         # Get original dimensions
         original_width, original_height = image.size
         
-        # Calculate new dimensions while preserving aspect ratio
-        # Use a maximum size of 512 pixels for the longer side to keep reasonable memory usage
-        max_size = 512
-        if original_width > original_height:
-            new_width = max_size
-            new_height = int((original_height * max_size) / original_width)
-        else:
-            new_height = max_size
-            new_width = int((original_width * max_size) / original_height)
+        # Calculate 50% dimensions
+        new_width = int(original_width * 0.5)
+        new_height = int(original_height * 0.5)
         
         # Ensure minimum size for very small images
         new_width = max(new_width, 64)
         new_height = max(new_height, 64)
         
-        # Create original size tensor
-        original_transform = transforms.Compose([
-            transforms.ToTensor()
-        ])
-        original_tensor = original_transform(image)
-        
-        # Create resized tensor for display
+        # Create 50% size tensor (for both display and output)
         resize_transform = transforms.Compose([
             transforms.Resize((new_height, new_width)),
             transforms.ToTensor()
         ])
         resized_tensor = resize_transform(image)
         
-        return resized_tensor, original_tensor
+        # Return the same tensor for both display and output (both at 50% resolution)
+        return resized_tensor, resized_tensor
     
     def _load_mask_tensor(self, mask_path, target_size=None):
         """Load and convert mask to tensor, optionally resizing to match target size"""
@@ -1549,15 +1502,10 @@ class DefectPlacementTool(QMainWindow):
                 transforms.ToTensor()
             ])
         else:
-            # Use the same aspect-ratio preserving resize as images
+            # Use the same 50% scaling as images
             original_width, original_height = mask.size
-            max_size = 512
-            if original_width > original_height:
-                new_width = max_size
-                new_height = int((original_height * max_size) / original_width)
-            else:
-                new_height = max_size
-                new_width = int((original_width * max_size) / original_height)
+            new_width = int(original_width * 0.5)
+            new_height = int(original_height * 0.5)
             
             new_width = max(new_width, 64)
             new_height = max(new_height, 64)

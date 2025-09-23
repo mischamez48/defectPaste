@@ -51,13 +51,12 @@ class DefectItem(QGraphicsPixmapItem):
         
     def update_transform(self, scale, rotation, opacity):
         """Update defect transformation"""
-        self.scale_factor = scale
+        self.scale_factor = 1.0  # No scaling at original size
         self.rotation_angle = rotation
         self.opacity = opacity
         
-        # Apply transformations
+        # Apply transformations (rotation only, no scaling)
         transform = QTransform()
-        transform.scale(scale, scale)
         transform.rotate(rotation)
         
         # Apply to pixmap (preserve RGBA format)
@@ -95,13 +94,12 @@ class SelectedRegionItem(QGraphicsPixmapItem):
         
     def update_transform(self, scale, rotation, opacity):
         """Update region transformation"""
-        self.scale_factor = scale
+        self.scale_factor = 1.0  # No scaling at original size
         self.rotation_angle = rotation
         self.opacity = opacity
         
-        # Apply transformations
+        # Apply transformations (rotation only, no scaling)
         transform = QTransform()
-        transform.scale(scale, scale)
         transform.rotate(rotation)
         
         # Apply to pixmap (preserve RGBA format)
@@ -178,9 +176,9 @@ class InteractiveCanvas(QGraphicsView):
         # [Removed] Object mask functionality
         
     def set_background_image(self, image_tensor, original_tensor=None):
-        """Set the background image"""
+        """Set the background image at original size"""
         self.background_tensor = image_tensor
-        self.original_background_tensor = original_tensor if original_tensor is not None else image_tensor
+        self.original_background_tensor = image_tensor  # Same as background since no resizing
         
         # Convert tensor to QPixmap
         image_np = image_tensor.permute(1, 2, 0).numpy()
@@ -208,6 +206,9 @@ class InteractiveCanvas(QGraphicsView):
         self.paint_layer.fill(Qt.transparent)
         self.paint_layer_item = self.scene.addPixmap(self.paint_layer)
         self.paint_layer_item.setZValue(1)  # Above background, below defects
+        
+        # Set scene size to match image size
+        self.scene.setSceneRect(0, 0, w, h)
         
         # Fit in view
         self.fitInView(self.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
@@ -822,17 +823,12 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.ArrowCursor)
         
     def get_augmented_image(self):
-        """Generate the final augmented image by painting the scene at original resolution."""
-        if self.background_tensor is None or self.original_background_tensor is None:
+        """Generate the final augmented image at original resolution."""
+        if self.background_tensor is None:
             return None, None
         
-        # Use original image dimensions
-        orig_h, orig_w = self.original_background_tensor.shape[1], self.original_background_tensor.shape[2]
-        display_h, display_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
-        
-        # Calculate scaling factors
-        scale_x = orig_w / display_w
-        scale_y = orig_h / display_h
+        # Use original image dimensions (no scaling needed)
+        orig_h, orig_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
         
         # Render color image at original size
         color_img = QImage(orig_w, orig_h, QImage.Format_RGB888)
@@ -843,45 +839,28 @@ class InteractiveCanvas(QGraphicsView):
         # Draw background at original size
         if self.background_item:
             painter.setOpacity(1.0)
-            # Scale the background pixmap to original size
             bg_pixmap = self.background_item.pixmap()
-            scaled_bg = bg_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_bg)
+            painter.drawPixmap(0, 0, bg_pixmap)
         
         # Draw paint layer at original size
         if self.paint_layer_item:
             painter.setOpacity(1.0)
             paint_pixmap = self.paint_layer_item.pixmap()
-            scaled_paint = paint_pixmap.scaled(orig_w, orig_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            painter.drawPixmap(0, 0, scaled_paint)
+            painter.drawPixmap(0, 0, paint_pixmap)
         
-        # Draw defects with their current opacity, scaled to original size
+        # Draw defects with their current opacity at original size
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         
-        # Draw regions with their current opacity, scaled to original size
+        # Draw regions with their current opacity at original size
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            # Scale position and size
-            x = int(item.x() * scale_x)
-            y = int(item.y() * scale_y)
-            # Scale the pixmap
-            scaled_pixmap = item.pixmap().scaled(
-                int(item.pixmap().width() * scale_x),
-                int(item.pixmap().height() * scale_y),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            painter.drawPixmap(x, y, scaled_pixmap)
+            x = int(item.x())
+            y = int(item.y())
+            painter.drawPixmap(x, y, item.pixmap())
         painter.end()
         
         # Render mask (grayscale) at original size
@@ -894,29 +873,15 @@ class InteractiveCanvas(QGraphicsView):
         for item in self.defect_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         for item in self.region_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Scale position and size
-                x = int(item.x() * scale_x)
-                y = int(item.y() * scale_y)
-                # Scale the mask pixmap
-                scaled_mask = item.mask_pixmap.scaled(
-                    int(item.mask_pixmap.width() * scale_x),
-                    int(item.mask_pixmap.height() * scale_y),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                mp.drawPixmap(x, y, scaled_mask)
+                x = int(item.x())
+                y = int(item.y())
+                mp.drawPixmap(x, y, item.mask_pixmap)
         mp.end()
         
         # Convert to tensors
@@ -1124,17 +1089,7 @@ class DefectPlacementTool(QMainWindow):
         transform_group = QGroupBox("Defect Transformation")
         transform_layout = QVBoxLayout()
         
-        # Scale slider
-        transform_layout.addWidget(QLabel("Scale:"))
-        self.scale_slider = QSlider(Qt.Horizontal)
-        self.scale_slider.setRange(25, 200)
-        self.scale_slider.setValue(100)
-        self.scale_slider.valueChanged.connect(self.update_defect_transform)
-        self.scale_label = QLabel("1.0x")
-        scale_layout = QHBoxLayout()
-        scale_layout.addWidget(self.scale_slider)
-        scale_layout.addWidget(self.scale_label)
-        transform_layout.addLayout(scale_layout)
+        # Scale slider removed - no scaling at original size
         
         # Rotation slider
         transform_layout.addWidget(QLabel("Rotation:"))
@@ -1490,8 +1445,8 @@ class DefectPlacementTool(QMainWindow):
             self.current_image_path = image_path
             
             # Load and display the image
-            resized_tensor, original_tensor = self._load_image_tensor(image_path)
-            self.canvas.set_background_image(resized_tensor, original_tensor)
+            image_tensor = self._load_image_tensor(image_path)
+            self.canvas.set_background_image(image_tensor)
             
             # Restore cached defects for this image, if any
             self.restore_state_from_cache()
@@ -1503,70 +1458,25 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load target image:\n{str(e)}")
     
     def _load_image_tensor(self, image_path):
-        """Load and convert image to tensor while preserving aspect ratio"""
+        """Load and convert image to tensor at original size"""
         image = Image.open(image_path).convert('RGB')
         
-        # Get original dimensions
-        original_width, original_height = image.size
-        
-        # Calculate new dimensions while preserving aspect ratio
-        # Use a maximum size of 512 pixels for the longer side to keep reasonable memory usage
-        max_size = 512
-        if original_width > original_height:
-            new_width = max_size
-            new_height = int((original_height * max_size) / original_width)
-        else:
-            new_height = max_size
-            new_width = int((original_width * max_size) / original_height)
-        
-        # Ensure minimum size for very small images
-        new_width = max(new_width, 64)
-        new_height = max(new_height, 64)
-        
-        # Create original size tensor
-        original_transform = transforms.Compose([
+        # Create tensor at original size only
+        transform = transforms.Compose([
             transforms.ToTensor()
         ])
-        original_tensor = original_transform(image)
+        image_tensor = transform(image)
         
-        # Create resized tensor for display
-        resize_transform = transforms.Compose([
-            transforms.Resize((new_height, new_width)),
-            transforms.ToTensor()
-        ])
-        resized_tensor = resize_transform(image)
-        
-        return resized_tensor, original_tensor
+        return image_tensor
     
     def _load_mask_tensor(self, mask_path, target_size=None):
-        """Load and convert mask to tensor, optionally resizing to match target size"""
+        """Load and convert mask to tensor at original size"""
         mask = Image.open(mask_path).convert('L')
         
-        if target_size is not None:
-            # Resize to match target image size
-            transform = transforms.Compose([
-                transforms.Resize(target_size),
-                transforms.ToTensor()
-            ])
-        else:
-            # Use the same aspect-ratio preserving resize as images
-            original_width, original_height = mask.size
-            max_size = 512
-            if original_width > original_height:
-                new_width = max_size
-                new_height = int((original_height * max_size) / original_width)
-            else:
-                new_height = max_size
-                new_width = int((original_width * max_size) / original_height)
-            
-            new_width = max(new_width, 64)
-            new_height = max(new_height, 64)
-            
-            transform = transforms.Compose([
-                transforms.Resize((new_height, new_width)),
-                transforms.ToTensor()
-            ])
-        
+        # Create tensor at original size only
+        transform = transforms.Compose([
+            transforms.ToTensor()
+        ])
         mask_tensor = transform(mask)
         return (mask_tensor > 0.5).float()
     
@@ -1677,7 +1587,7 @@ class DefectPlacementTool(QMainWindow):
             
             try:
                 # Load the defect image first
-                defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
+                defect_image_tensor = self._load_image_tensor(defect_image_path)
                 
                 # Load the mask with the same size as the defect image
                 mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
@@ -1769,7 +1679,7 @@ class DefectPlacementTool(QMainWindow):
                 return
                 
             # Load the defect image
-            defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
+            defect_image_tensor = self._load_image_tensor(defect_image_path)
             
             # Load the mask with the same size as the defect image
             mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
@@ -1797,10 +1707,8 @@ class DefectPlacementTool(QMainWindow):
             )
             
             # Reset transformation controls to defaults for the new defect
-            self.scale_slider.setValue(100)
             self.rotation_slider.setValue(0)
             self.opacity_slider.setValue(70)
-            self.scale_label.setText("1.0x")
             self.rotation_label.setText("0°")
             self.opacity_label.setText("0.7")
 
@@ -1871,11 +1779,10 @@ class DefectPlacementTool(QMainWindow):
         if not selected_item:
             return
             
-        scale = self.scale_slider.value() / 100.0
+        scale = 1.0  # No scaling at original size
         rotation = self.rotation_slider.value()
         opacity = self.opacity_slider.value() / 100.0
         
-        self.scale_label.setText(f"{scale:.1f}x")
         self.rotation_label.setText(f"{rotation}°")
         self.opacity_label.setText(f"{opacity:.1f}")
         
@@ -2200,8 +2107,8 @@ class DefectPlacementTool(QMainWindow):
                 continue
             # Load target image
             self.current_image_path = key
-            resized_tensor, original_tensor = self._load_image_tensor(key)
-            self.canvas.set_background_image(resized_tensor, original_tensor)
+            image_tensor = self._load_image_tensor(key)
+            self.canvas.set_background_image(image_tensor)
             # Restore this image's state
             self.restore_state_from_cache()
             # Render

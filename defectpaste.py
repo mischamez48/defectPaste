@@ -892,11 +892,14 @@ class InteractiveCanvas(QGraphicsView):
                 mp.drawPixmap(x, y, item.mask_pixmap)
         mp.end()
         
-        # Convert to tensors
-        color_bytes = color_img.bits().asstring(display_w * display_h * 3)
-        color_np = np.frombuffer(color_bytes, dtype=np.uint8).reshape((display_h, display_w, 3)).copy()
-        mask_bytes = mask_img.bits().asstring(display_w * display_h)
-        mask_np = np.frombuffer(mask_bytes, dtype=np.uint8).reshape((display_h, display_w)).copy()
+        # Convert to tensors using safer method for large images
+        # Convert QImage to PIL Image first to avoid memory access issues with large images
+        color_pil = Image.frombytes('RGB', (display_w, display_h), color_img.bits(), 'raw', 'RGB')
+        mask_pil = Image.frombytes('L', (display_w, display_h), mask_img.bits(), 'raw', 'L')
+        
+        # Convert to numpy arrays
+        color_np = np.array(color_pil)
+        mask_np = np.array(mask_pil)
         
         color_tensor = torch.from_numpy(color_np).float().permute(2, 0, 1) / 255.0
         mask_tensor = torch.from_numpy(mask_np).float().unsqueeze(0) / 255.0
@@ -904,20 +907,18 @@ class InteractiveCanvas(QGraphicsView):
         return color_tensor, mask_tensor
         
     def pixmap_to_numpy(self, pixmap, grayscale=False):
-        """Convert QPixmap to numpy array"""
+        """Convert QPixmap to numpy array using safer method for large images"""
         qimage = pixmap.toImage()
         width, height = qimage.width(), qimage.height()
         
         if grayscale:
             qimage = qimage.convertToFormat(QImage.Format_Grayscale8)
-            ptr = qimage.bits()
-            ptr.setsize(height * width)
-            arr = np.frombuffer(ptr, np.uint8).reshape((height, width))
+            pil_image = Image.frombytes('L', (width, height), qimage.bits(), 'raw', 'L')
+            arr = np.array(pil_image)
         else:
             qimage = qimage.convertToFormat(QImage.Format_RGB888)
-            ptr = qimage.bits()
-            ptr.setsize(height * width * 3)
-            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 3))
+            pil_image = Image.frombytes('RGB', (width, height), qimage.bits(), 'raw', 'RGB')
+            arr = np.array(pil_image)
             
         return arr
         

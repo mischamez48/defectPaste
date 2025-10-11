@@ -871,6 +871,34 @@ class InteractiveCanvas(QGraphicsView):
         mp = QPainter(mask_img)
         mp.setRenderHint(QPainter.SmoothPixmapTransform)
         mp.setRenderHint(QPainter.Antialiasing)
+        
+        # Draw paint layer to mask (convert alpha channel to white)
+        if self.paint_layer_item and self.paint_layer:
+            # Convert paint layer alpha channel to grayscale mask efficiently
+            paint_img = self.paint_layer.toImage()
+            paint_img = paint_img.convertToFormat(QImage.Format_RGBA8888)
+            
+            width = paint_img.width()
+            height = paint_img.height()
+            bytes_per_line = paint_img.bytesPerLine()
+            ptr = paint_img.bits()
+            ptr.setsize(height * bytes_per_line)
+            
+            # Convert to numpy array
+            img_array = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+            img_array = img_array[:, :width*4].reshape((height, width, 4))
+            
+            # Extract alpha channel and convert to binary mask
+            alpha_channel = img_array[:, :, 3]
+            paint_mask_array = np.where(alpha_channel > 10, 255, 0).astype(np.uint8)
+            
+            # Create QImage from numpy array
+            paint_mask = QImage(paint_mask_array.data, width, height, width, QImage.Format_Grayscale8)
+            paint_mask.bits().setsize(paint_mask_array.nbytes)
+            
+            mp.setOpacity(1.0)
+            mp.drawImage(0, 0, paint_mask)
+        
         for item in self.defect_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
@@ -1054,6 +1082,9 @@ class DefectPlacementTool(QMainWindow):
        
         # Track which images have been saved
         self.saved_images: set = set()
+        
+        # Remember last used directory for file dialogs
+        self.last_directory = os.getcwd()
        
         self.init_ui()
        
@@ -1362,13 +1393,12 @@ class DefectPlacementTool(QMainWindow):
        
     def load_target_images(self):
         """Load target images from directory"""
-        # Check for unsaved changes before loading new dataset
-        if not self._check_unsaved_changes("loading new target images"):
-            return
-           
         self.target_images_dir = QFileDialog.getExistingDirectory(
-            self, "Select Target Images Directory", os.getcwd()
+            self, "Select Target Images Directory", self.last_directory
         )
+        
+        if self.target_images_dir:
+            self.last_directory = self.target_images_dir
        
         if not self.target_images_dir:
             return
@@ -1396,13 +1426,12 @@ class DefectPlacementTool(QMainWindow):
        
     def load_defect_images(self):
         """Load defect images from directory"""
-        # Check for unsaved changes before loading new dataset
-        if not self._check_unsaved_changes("loading new defect images"):
-            return
-           
         self.defect_images_dir = QFileDialog.getExistingDirectory(
-            self, "Select Defect Images Directory", os.getcwd()
+            self, "Select Defect Images Directory", self.last_directory
         )
+        
+        if self.defect_images_dir:
+            self.last_directory = self.defect_images_dir
        
         if not self.defect_images_dir:
             return
@@ -1431,13 +1460,12 @@ class DefectPlacementTool(QMainWindow):
        
     def load_defect_masks(self):
         """Load defect masks from directory"""
-        # Check for unsaved changes before loading new dataset
-        if not self._check_unsaved_changes("loading new defect masks"):
-            return
-           
         self.defect_masks_dir = QFileDialog.getExistingDirectory(
-            self, "Select Defect Masks Directory", os.getcwd()
+            self, "Select Defect Masks Directory", self.last_directory
         )
+        
+        if self.defect_masks_dir:
+            self.last_directory = self.defect_masks_dir
        
         if not self.defect_masks_dir:
             return
@@ -1516,10 +1544,6 @@ class DefectPlacementTool(QMainWindow):
         if not self.target_images:
             return
        
-        # Check for unsaved changes before switching
-        if not self._check_unsaved_changes("switching images"):
-            return
-           
         try:
             # Save current state before switching
             self.save_current_state_to_cache()
@@ -1928,29 +1952,17 @@ class DefectPlacementTool(QMainWindow):
        
     def clear_all_defects(self):
         """Clear all defects and regions from canvas"""
-        # Check for unsaved changes before clearing
-        if not self._check_unsaved_changes("clearing all defects and regions"):
-            return
-           
         self.canvas.clear_defects()
         self.canvas.clear_regions()
         self.status_bar.showMessage("Cleared all defects and regions")
    
     def clear_paint_layer(self):
         """Clear the paint layer"""
-        # Check for unsaved changes before clearing paint
-        if not self._check_unsaved_changes("clearing paint layer"):
-            return
-           
         self.canvas.clear_paint_layer()
         self.status_bar.showMessage("Cleared paint layer")
        
     def clear_all(self):
         """Clear everything"""
-        # Check for unsaved changes before clearing everything
-        if not self._check_unsaved_changes("clearing everything"):
-            return
-           
         self.canvas.clear_defects()
         self.canvas.clear_regions()
         self.canvas.clear_paint_layer()
@@ -2118,6 +2130,112 @@ class DefectPlacementTool(QMainWindow):
         except Exception as e:
             print(f"Error extracting segmentation: {e}")
             return None
+    
+    def extract_paint_strokes_segmentation(self):
+        """Extract segmentation from paint layer
+        
+        Returns:
+            list of dicts with 'bbox' and 'segmentation' for each painted region, or empty list
+        """
+        if not self.canvas.paint_layer or self.canvas.paint_layer.isNull():
+            return []
+        
+        try:
+            # Convert paint layer to numpy array
+            paint_image = self.canvas.paint_layer.toImage()
+            width = paint_image.width()
+            height = paint_image.height()
+            
+            # Convert to RGBA format
+            paint_image = paint_image.convertToFormat(QImage.Format_RGBA8888)
+            bytes_per_line = paint_image.bytesPerLine()
+            ptr = paint_image.bits()
+            ptr.setsize(height * bytes_per_line)
+            
+            # Create numpy array
+            img_array = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+            img_array = img_array[:, :width*4].reshape((height, width, 4)).copy()
+            
+            # Extract alpha channel (transparency)
+            alpha_channel = img_array[:, :, 3]
+            
+            # Threshold to binary (any non-transparent pixel)
+            _, binary_mask = cv2.threshold(alpha_channel, 10, 255, cv2.THRESH_BINARY)
+            
+            # Find all contours
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if not contours:
+                return []
+            
+            # Extract segmentation for all contours (paint strokes)
+            paint_strokes = []
+            for contour in contours:
+                # Filter out very small contours (noise)
+                area = cv2.contourArea(contour)
+                if area < 10:  # Minimum area threshold
+                    continue
+                
+                # Get bounding box
+                x, y, w, h = cv2.boundingRect(contour)
+                
+                # Extract segmentation points
+                segmentation = []
+                for point in contour:
+                    px = float(point[0][0])
+                    py = float(point[0][1])
+                    segmentation.append([px, py])
+                
+                paint_strokes.append({
+                    'bbox': [x, y, w, h],
+                    'segmentation': [segmentation]
+                })
+            
+            return paint_strokes
+            
+        except Exception as e:
+            print(f"Error extracting paint strokes segmentation: {e}")
+            return []
+    
+    def get_paint_mask_tensor(self):
+        """Get the paint layer as a binary mask tensor
+        
+        Returns:
+            torch.Tensor of paint mask, or None if no paint layer
+        """
+        if not self.canvas.paint_layer or self.canvas.paint_layer.isNull():
+            return None
+        
+        try:
+            # Convert paint layer to numpy array
+            paint_image = self.canvas.paint_layer.toImage()
+            width = paint_image.width()
+            height = paint_image.height()
+            
+            # Convert to RGBA format
+            paint_image = paint_image.convertToFormat(QImage.Format_RGBA8888)
+            bytes_per_line = paint_image.bytesPerLine()
+            ptr = paint_image.bits()
+            ptr.setsize(height * bytes_per_line)
+            
+            # Create numpy array
+            img_array = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+            img_array = img_array[:, :width*4].reshape((height, width, 4)).copy()
+            
+            # Extract alpha channel (transparency)
+            alpha_channel = img_array[:, :, 3]
+            
+            # Convert to binary mask (white where paint exists)
+            binary_mask = np.where(alpha_channel > 10, 255, 0).astype(np.uint8)
+            
+            # Convert to tensor
+            mask_tensor = torch.from_numpy(binary_mask).unsqueeze(0).float() / 255.0
+            
+            return mask_tensor
+            
+        except Exception as e:
+            print(f"Error creating paint mask tensor: {e}")
+            return None
    
     def save_augmented_image(self):
         """Save the augmented image and mask"""
@@ -2134,8 +2252,11 @@ class DefectPlacementTool(QMainWindow):
            
         # Get save path
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Augmented Image", os.getcwd(), "PNG Files (*.png)"
+            self, "Save Augmented Image", self.last_directory, "PNG Files (*.png)"
         )
+        
+        if save_path:
+            self.last_directory = os.path.dirname(save_path)
        
         if save_path:
             # Save image
@@ -2147,6 +2268,13 @@ class DefectPlacementTool(QMainWindow):
                 mask_path = save_path.replace('.png', '_mask.png')
                 mask_pil = TF.to_pil_image(result_mask)
                 mask_pil.save(mask_path)
+            
+            # Save paint mask separately if paint strokes exist
+            paint_mask_tensor = self.get_paint_mask_tensor()
+            if paint_mask_tensor is not None:
+                paint_mask_path = save_path.replace('.png', '_paint_mask.png')
+                paint_mask_pil = TF.to_pil_image(paint_mask_tensor)
+                paint_mask_pil.save(paint_mask_path)
            
             # Save metadata
             # Extract segmentation for defects
@@ -2200,12 +2328,24 @@ class DefectPlacementTool(QMainWindow):
                 
                 regions_metadata.append(region_meta)
             
+            # Extract segmentation from paint layer
+            paint_strokes = self.extract_paint_strokes_segmentation()
+            paint_strokes_metadata = []
+            for idx, stroke in enumerate(paint_strokes):
+                paint_strokes_metadata.append({
+                    'label': 'paint_stroke',
+                    'stroke_index': idx,
+                    'bbox': stroke['bbox'],
+                    'segmentation': stroke['segmentation']
+                })
+            
             metadata = {
                 'target_image': os.path.basename(self.current_image_path),
                 'target_image_path': self.current_image_path,
                 'has_excluded_masks': has_excluded_masks,
                 'defects': defects_metadata,
-                'regions': regions_metadata
+                'regions': regions_metadata,
+                'paint_strokes': paint_strokes_metadata
             }
            
             meta_path = save_path.replace('.png', '_metadata.json')
@@ -2302,9 +2442,11 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.information(self, "Info", "No augmentations to save.")
             return
         # Choose output dir
-        output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory for All Augmented", os.getcwd())
+        output_dir = QFileDialog.getExistingDirectory(self, "Select Output Directory for All Augmented", self.last_directory)
         if not output_dir:
             return
+        
+        self.last_directory = output_dir
         # Choose base name
         from PyQt5.QtWidgets import QInputDialog
         base_name, ok = QInputDialog.getText(self, "Base filename", "Enter base filename:", text="augmented")
@@ -2352,6 +2494,14 @@ class DefectPlacementTool(QMainWindow):
                 mask_path = os.path.join(output_dir, mask_filename)
                 mask_pil = TF.to_pil_image(result_mask)
                 mask_pil.save(mask_path)
+            
+            # Save paint mask separately if paint strokes exist
+            paint_mask_tensor = self.get_paint_mask_tensor()
+            if paint_mask_tensor is not None:
+                paint_mask_filename = f"{base_name}_{current_idx}_paint_mask.png"
+                paint_mask_path = os.path.join(output_dir, paint_mask_filename)
+                paint_mask_pil = TF.to_pil_image(paint_mask_tensor)
+                paint_mask_pil.save(paint_mask_path)
            
             # Save metadata
             # Extract segmentation for defects
@@ -2405,12 +2555,24 @@ class DefectPlacementTool(QMainWindow):
                 
                 regions_metadata.append(region_meta)
             
+            # Extract segmentation from paint layer
+            paint_strokes = self.extract_paint_strokes_segmentation()
+            paint_strokes_metadata = []
+            for idx, stroke in enumerate(paint_strokes):
+                paint_strokes_metadata.append({
+                    'label': 'paint_stroke',
+                    'stroke_index': idx,
+                    'bbox': stroke['bbox'],
+                    'segmentation': stroke['segmentation']
+                })
+            
             metadata = {
                 'target_image': os.path.basename(key),
                 'target_image_path': key,
                 'has_excluded_masks': has_excluded_masks,
                 'defects': defects_metadata,
-                'regions': regions_metadata
+                'regions': regions_metadata,
+                'paint_strokes': paint_strokes_metadata
             }
             meta_path = os.path.join(output_dir, f"{base_name}_{current_idx}_metadata.json")
             with open(meta_path, 'w') as f:
@@ -2530,17 +2692,37 @@ class DefectPlacementTool(QMainWindow):
             self._mark_unsaved()
 
     def closeEvent(self, event):
-        """Prompt to save changes on close if needed."""
+        """Prompt to confirm exit."""
         try:
             self.save_current_state_to_cache()
         except Exception:
             pass
        
-        # Use the comprehensive save checking system
-        if not self._check_unsaved_changes("exiting the application"):
-            event.ignore()
+        # Check if there are unsaved changes
+        has_changes = self.has_unsaved_changes
+        has_defects = len(self.canvas.defect_items) > 0
+        has_regions = len(self.canvas.region_items) > 0
+        has_paint = self.has_unsaved_paint_changes()
+        
+        # Create confirmation message
+        if has_changes and (has_defects or has_regions or has_paint):
+            message = "Are you sure you want to quit?\n\nYou have unsaved modifications that will be lost."
         else:
+            message = "Are you sure you want to quit?"
+        
+        # Show simple confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Confirm Exit",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
             event.accept()
+        else:
+            event.ignore()
 
 
 def main():

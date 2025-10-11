@@ -7,6 +7,7 @@ import sys
 import os
 import json
 import numpy as np
+import cv2
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QSlider, QComboBox, QListWidget, QGroupBox,
@@ -31,7 +32,7 @@ import random
 
 class DefectItem(QGraphicsPixmapItem):
     """Draggable defect item on the canvas"""
-    
+   
     def __init__(self, pixmap, mask_pixmap, defect_data, exclude_masks=False, parent=None):
         super().__init__(pixmap)
         self.mask_pixmap = mask_pixmap
@@ -48,26 +49,26 @@ class DefectItem(QGraphicsPixmapItem):
         self.scale_factor = 1.0
         self.rotation_angle = 0
         self.opacity = 0.7
-        
+       
     def update_transform(self, scale, rotation, opacity):
         """Update defect transformation"""
         self.scale_factor = scale
         self.rotation_angle = rotation
         self.opacity = opacity
-        
+       
         # Apply transformations
         transform = QTransform()
         transform.scale(scale, scale)
         transform.rotate(rotation)
-        
+       
         # Apply to pixmap (preserve RGBA format)
         transformed_pixmap = self.original_pixmap.transformed(transform, Qt.SmoothTransformation)
         transformed_mask = self.original_mask.transformed(transform, Qt.SmoothTransformation)
-        
+       
         self.setPixmap(transformed_pixmap)
         self.mask_pixmap = transformed_mask
         self.setOpacity(opacity)
-        
+       
     def get_position(self):
         """Get current position"""
         return self.pos().x(), self.pos().y()
@@ -75,7 +76,7 @@ class DefectItem(QGraphicsPixmapItem):
 
 class SelectedRegionItem(QGraphicsPixmapItem):
     """Draggable selected region item on the canvas"""
-    
+   
     def __init__(self, pixmap, mask_pixmap, region_data, exclude_masks=False, parent=None):
         super().__init__(pixmap)
         self.mask_pixmap = mask_pixmap
@@ -92,26 +93,26 @@ class SelectedRegionItem(QGraphicsPixmapItem):
         self.scale_factor = 1.0
         self.rotation_angle = 0
         self.opacity = 0.8
-        
+       
     def update_transform(self, scale, rotation, opacity):
         """Update region transformation"""
         self.scale_factor = scale
         self.rotation_angle = rotation
         self.opacity = opacity
-        
+       
         # Apply transformations
         transform = QTransform()
         transform.scale(scale, scale)
         transform.rotate(rotation)
-        
+       
         # Apply to pixmap (preserve RGBA format)
         transformed_pixmap = self.original_pixmap.transformed(transform, Qt.SmoothTransformation)
         transformed_mask = self.original_mask.transformed(transform, Qt.SmoothTransformation)
-        
+       
         self.setPixmap(transformed_pixmap)
         self.mask_pixmap = transformed_mask
         self.setOpacity(opacity)
-        
+       
     def get_position(self):
         """Get current position"""
         return self.pos().x(), self.pos().y()
@@ -119,31 +120,31 @@ class SelectedRegionItem(QGraphicsPixmapItem):
 
 class InteractiveCanvas(QGraphicsView):
     """Main canvas for placing defects"""
-    
+   
     defect_placed = pyqtSignal(dict)
     paint_changed = pyqtSignal()
     region_placed = pyqtSignal(dict)
-    
+   
     def __init__(self, main_window=None):
         super().__init__()
         self.main_window = main_window  # Reference to main window to access exclude_masks state
         self.scene = QGraphicsScene()
         self.setScene(self.scene)
         self.scene.selectionChanged.connect(self.on_selection_changed)
-        
+       
         # Background image
         self.background_item = None
         self.background_tensor = None
         self.original_background_tensor = None  # Store original size image
-        
+       
         # Defect items
         self.defect_items = []
         self.selected_defect = None
-        
+       
         # Selected region items
         self.region_items = []
         self.selected_region = None
-        
+       
         # Selection tool settings
         self.selection_enabled = False
         self.selection_mode = "Rectangle"  # "Rectangle" or "Freehand"
@@ -152,12 +153,12 @@ class InteractiveCanvas(QGraphicsView):
         self.selection_rect = None
         self.selection_item = None
         self.current_selection = None  # Store the current selection data
-        
+       
         # Freehand selection
         self.freehand_path = None
         self.freehand_points = []
         self.freehand_item = None
-        
+       
         # Paint brush settings
         self.brush_enabled = False
         self.brush_mode = "Paint"  # "Paint" or "Erase"
@@ -166,30 +167,30 @@ class InteractiveCanvas(QGraphicsView):
         self.brush_color = QColor(0, 0, 0)  # Black by default
         self.is_painting = False
         self.last_paint_point = None
-        
+       
         # Paint layer for brush strokes
         self.paint_layer = None
         self.paint_layer_item = None
-        
+       
         # Settings
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setRenderHint(QPainter.Antialiasing)
-        
+       
         # [Removed] Object mask functionality
-        
+       
     def set_background_image(self, image_tensor, original_tensor=None):
         """Set the background image"""
         self.background_tensor = image_tensor
         self.original_background_tensor = original_tensor if original_tensor is not None else image_tensor
-        
+       
         # Convert tensor to QPixmap
         image_np = image_tensor.permute(1, 2, 0).numpy()
         image_np = (image_np * 255).astype(np.uint8)
         h, w, c = image_np.shape
-        
+       
         qimage = QImage(image_np.tobytes(), w, h, w * c, QImage.Format_RGB888)
         pixmap = QPixmap.fromImage(qimage)
-        
+       
         # Clear scene
         self.scene.clear()
         self.defect_items.clear()
@@ -198,22 +199,22 @@ class InteractiveCanvas(QGraphicsView):
         self.selected_defect = None
         self.selected_region = None
         self.current_selection = None
-        
+       
         # Add background
         self.background_item = self.scene.addPixmap(pixmap)
         self.background_item.setZValue(0)
-        
+       
         # Create paint layer
         self.paint_layer = QPixmap(pixmap.size())
         self.paint_layer.fill(Qt.transparent)
         self.paint_layer_item = self.scene.addPixmap(self.paint_layer)
         self.paint_layer_item.setZValue(1)  # Above background, below defects
-        
+       
         # Fit in view
         self.fitInView(self.scene.itemsBoundingRect(), Qt.KeepAspectRatio)
-        
+       
     # [Removed] Object mask overlay methods
-            
+           
     def add_defect(self, defect_tensor, mask_tensor, defect_info, position: Optional[Tuple[int, int]] = None, opacity_override: Optional[float] = None, exclude_masks: bool = False):
         """Add a defect to the canvas.
         Optionally provide a top-left position (x,y) and opacity to place without recentering.
@@ -223,24 +224,24 @@ class InteractiveCanvas(QGraphicsView):
         defect_np = (defect_np * 255).astype(np.uint8)
         mask_np = mask_tensor.squeeze(0).numpy()
         mask_np = (mask_np * 255).astype(np.uint8)
-        
+       
         h, w, c = defect_np.shape
-        
+       
         # Create RGBA image with transparency
         rgba_np = np.zeros((h, w, 4), dtype=np.uint8)
         rgba_np[:, :, :3] = defect_np  # RGB channels
         rgba_np[:, :, 3] = mask_np     # Alpha channel from mask
-        
+       
         qimage = QImage(rgba_np.tobytes(), w, h, w * 4, QImage.Format_RGBA8888)
         pixmap = QPixmap.fromImage(qimage)
-        
+       
         # Convert mask to pixmap (for internal use)
         mask_qimage = QImage(mask_np.tobytes(), w, h, w, QImage.Format_Grayscale8)
         mask_pixmap = QPixmap.fromImage(mask_qimage)
-        
+       
         # Create defect item
         defect_item = DefectItem(pixmap, mask_pixmap, defect_info, exclude_masks)
-        
+       
         # Position
         if position is not None:
             defect_item.setPos(float(position[0]), float(position[1]))
@@ -253,18 +254,18 @@ class InteractiveCanvas(QGraphicsView):
                 )
         if opacity_override is not None:
             defect_item.setOpacity(float(opacity_override))
-        
+       
         self.scene.addItem(defect_item)
         self.defect_items.append(defect_item)
         self.selected_defect = defect_item
-        
-        
+       
+       
         # Emit signal
         self.defect_placed.emit({
             'type': defect_info.get('type', 'unknown'),
             'position': (defect_item.x(), defect_item.y())
         })
-        
+       
     def remove_selected_defect(self):
         """Remove the selected defect"""
         try:
@@ -272,35 +273,35 @@ class InteractiveCanvas(QGraphicsView):
                 return
             # Gather selected items from the scene
             selected_items = [item for item in self.scene.selectedItems() if isinstance(item, DefectItem)]
-            
+           
             # Fallback to single tracked selection
             if not selected_items and self.selected_defect and self.selected_defect in self.defect_items:
                 selected_items = [self.selected_defect]
-            
+           
             if not selected_items:
                 return
-            
+           
             # Remove all selected defect items
             for item in selected_items:
                 if item in self.defect_items:
                     self.scene.removeItem(item)
                     self.defect_items.remove(item)
-            
+           
             # Update current selection reference
             remaining_selected = [item for item in self.scene.selectedItems() if isinstance(item, DefectItem)]
             self.selected_defect = remaining_selected[-1] if remaining_selected else None
         except RuntimeError:
             # Scene has been deleted, ignore
             pass
-            
+           
     def clear_defects(self):
         """Clear all defects from canvas"""
         for item in list(self.defect_items):
             self.scene.removeItem(item)
         self.defect_items.clear()
         self.selected_defect = None
-        
-    
+       
+   
     def on_selection_changed(self):
         """Sync tracked selected defect and region with scene selection"""
         try:
@@ -308,13 +309,13 @@ class InteractiveCanvas(QGraphicsView):
                 return
             selected_defects = [item for item in self.scene.selectedItems() if isinstance(item, DefectItem)]
             selected_regions = [item for item in self.scene.selectedItems() if isinstance(item, SelectedRegionItem)]
-            
+           
             self.selected_defect = selected_defects[-1] if selected_defects else None
             self.selected_region = selected_regions[-1] if selected_regions else None
         except RuntimeError:
             # Scene has been deleted, ignore
             pass
-    
+   
     def mousePressEvent(self, event):
         """Handle mouse press events for painting and selection"""
         if self.selection_enabled and event.button() == Qt.LeftButton:
@@ -330,7 +331,7 @@ class InteractiveCanvas(QGraphicsView):
             self.paint_at_point(self.last_paint_point)
         else:
             super().mousePressEvent(event)
-    
+   
     def mouseMoveEvent(self, event):
         """Handle mouse move events for painting and selection"""
         if self.selection_enabled and self.is_selecting and event.buttons() & Qt.LeftButton:
@@ -345,7 +346,7 @@ class InteractiveCanvas(QGraphicsView):
             self.last_paint_point = current_point
         else:
             super().mouseMoveEvent(event)
-    
+   
     def mouseReleaseEvent(self, event):
         """Handle mouse release events"""
         if self.selection_enabled and event.button() == Qt.LeftButton:
@@ -359,7 +360,7 @@ class InteractiveCanvas(QGraphicsView):
             self.last_paint_point = None
         else:
             super().mouseReleaseEvent(event)
-    
+   
     def keyPressEvent(self, event):
         """Handle keyboard events"""
         if self.selection_enabled and event.key() == Qt.Key_Return:
@@ -374,28 +375,28 @@ class InteractiveCanvas(QGraphicsView):
                 self.clear_selection()
         else:
             super().keyPressEvent(event)
-    
+   
     def paint_at_point(self, point):
         """Paint at a specific point"""
         if not self.paint_layer or not self.background_item:
             return
-            
+           
         painter = QPainter(self.paint_layer)
         painter.setRenderHint(QPainter.Antialiasing)
-        
+       
         # Set brush properties
         brush = QBrush(self.brush_color)
         painter.setBrush(brush)
         painter.setPen(Qt.NoPen)
-        
+       
         # Set opacity
         painter.setOpacity(self.brush_opacity / 100.0)
-        
+       
         # Convert scene coordinates to pixmap coordinates
         pixmap_rect = self.background_item.boundingRect()
         x = int(point.x() - pixmap_rect.x())
         y = int(point.y() - pixmap_rect.y())
-        
+       
         # Draw circle
         radius = self.brush_size // 2
         if self.brush_mode == "Paint":
@@ -404,63 +405,63 @@ class InteractiveCanvas(QGraphicsView):
             # For erase mode, we'll use a different approach
             painter.setCompositionMode(QPainter.CompositionMode_Clear)
             painter.drawEllipse(x - radius, y - radius, self.brush_size, self.brush_size)
-        
+       
         painter.end()
-        
+       
         # Update the paint layer item
         self.paint_layer_item.setPixmap(self.paint_layer)
-        
+       
         # Emit signal to mark changes as unsaved
         self.paint_changed.emit()
-    
+   
     def paint_line(self, start_point, end_point):
         """Paint a line between two points"""
         if not self.paint_layer or not self.background_item:
             return
-            
+           
         painter = QPainter(self.paint_layer)
         painter.setRenderHint(QPainter.Antialiasing)
-        
+       
         # Set brush properties
         pen = QPen(self.brush_color, self.brush_size, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         painter.setPen(pen)
-        
+       
         # Set opacity
         painter.setOpacity(self.brush_opacity / 100.0)
-        
+       
         # Convert scene coordinates to pixmap coordinates
         pixmap_rect = self.background_item.boundingRect()
         start_x = int(start_point.x() - pixmap_rect.x())
         start_y = int(start_point.y() - pixmap_rect.y())
         end_x = int(end_point.x() - pixmap_rect.x())
         end_y = int(end_point.y() - pixmap_rect.y())
-        
+       
         if self.brush_mode == "Paint":
             painter.drawLine(start_x, start_y, end_x, end_y)
         elif self.brush_mode == "Erase":
             painter.setCompositionMode(QPainter.CompositionMode_Clear)
             painter.drawLine(start_x, start_y, end_x, end_y)
-        
+       
         painter.end()
-        
+       
         # Update the paint layer item
         self.paint_layer_item.setPixmap(self.paint_layer)
-        
+       
         # Emit signal to mark changes as unsaved
         self.paint_changed.emit()
-    
+   
     def clear_paint_layer(self):
         """Clear the paint layer"""
         if self.paint_layer:
             self.paint_layer.fill(Qt.transparent)
             self.paint_layer_item.setPixmap(self.paint_layer)
-    
+   
     def start_rectangle_selection(self):
         """Start rectangle selection"""
         if self.selection_item:
             self.scene.removeItem(self.selection_item)
         self.selection_item = None
-    
+   
     def start_freehand_selection(self):
         """Start freehand selection"""
         if self.freehand_item:
@@ -470,72 +471,72 @@ class InteractiveCanvas(QGraphicsView):
         self.freehand_path = QPainterPath()
         self.freehand_path.moveTo(self.selection_start)
         self.freehand_points.append(self.selection_start)
-    
+   
     def update_rectangle_selection(self, current_point):
         """Update rectangle selection during drag"""
         if not self.selection_start:
             return
-            
+           
         # Create rectangle from start to current point
         rect = QRectF(self.selection_start, current_point).normalized()
-        
+       
         # Remove previous selection rectangle
         if self.selection_item:
             self.scene.removeItem(self.selection_item)
-        
+       
         # Create new selection rectangle with better visual feedback
         self.selection_item = QGraphicsRectItem(rect)
         self.selection_item.setPen(QPen(QColor(0, 255, 0), 1, Qt.SolidLine))  # Green solid line - thinner
         self.selection_item.setBrush(QBrush(QColor(0, 255, 0, 30)))  # Light green fill
         self.selection_item.setZValue(10)  # Above everything
         self.scene.addItem(self.selection_item)
-    
+   
     def update_freehand_selection(self, current_point):
         """Update freehand selection during drag"""
         if not self.freehand_path:
             return
-            
+           
         # Add line to current point
         self.freehand_path.lineTo(current_point)
         self.freehand_points.append(current_point)
-        
+       
         # Remove previous freehand path
         if self.freehand_item:
             self.scene.removeItem(self.freehand_item)
-        
+       
         # Create new freehand path item
         self.freehand_item = QGraphicsPathItem(self.freehand_path)
         self.freehand_item.setPen(QPen(QColor(0, 255, 0), 1, Qt.SolidLine))  # Green solid line - thinner
         self.freehand_item.setBrush(QBrush(QColor(0, 255, 0, 30)))  # Light green fill
         self.freehand_item.setZValue(10)  # Above everything
         self.scene.addItem(self.freehand_item)
-    
+   
     def finish_rectangle_selection(self):
         """Finish rectangle selection and automatically create draggable region"""
         if not self.selection_item or not self.background_item:
             return
-            
+           
         # Get the selection rectangle
         selection_rect = self.selection_item.rect()
-        
+       
         # Convert to background image coordinates
         bg_rect = self.background_item.boundingRect()
         x = int(selection_rect.x() - bg_rect.x())
         y = int(selection_rect.y() - bg_rect.y())
         w = int(selection_rect.width())
         h = int(selection_rect.height())
-        
+       
         # Ensure selection is within bounds
         x = max(0, min(x, int(bg_rect.width()) - 1))
         y = max(0, min(y, int(bg_rect.height()) - 1))
         w = min(w, int(bg_rect.width()) - x)
         h = min(h, int(bg_rect.height()) - y)
-        
+       
         if w > 5 and h > 5:  # Minimum size check
             # Remove selection rectangle
             self.scene.removeItem(self.selection_item)
             self.selection_item = None
-            
+           
             # Automatically create draggable region
             exclude_masks = self.main_window.exclude_mask_cb.isChecked() if self.main_window else False
             self.create_region_from_selection(x, y, w, h, bg_rect, exclude_masks)
@@ -544,7 +545,7 @@ class InteractiveCanvas(QGraphicsView):
             self.scene.removeItem(self.selection_item)
             self.selection_item = None
             self.region_placed.emit({'has_selection': False})
-    
+   
     def finish_freehand_selection(self):
         """Finish freehand selection and automatically create draggable region"""
         if not self.freehand_item or not self.background_item or len(self.freehand_points) < 3:
@@ -554,28 +555,28 @@ class InteractiveCanvas(QGraphicsView):
                 self.freehand_item = None
             self.region_placed.emit({'has_selection': False})
             return
-            
+           
         # Get the bounding rect of the freehand path
         path_rect = self.freehand_path.boundingRect()
-        
+       
         # Convert to background image coordinates
         bg_rect = self.background_item.boundingRect()
         x = int(path_rect.x() - bg_rect.x())
         y = int(path_rect.y() - bg_rect.y())
         w = int(path_rect.width())
         h = int(path_rect.height())
-        
+       
         # Ensure selection is within bounds
         x = max(0, min(x, int(bg_rect.width()) - 1))
         y = max(0, min(y, int(bg_rect.height()) - 1))
         w = min(w, int(bg_rect.width()) - x)
         h = min(h, int(bg_rect.height()) - y)
-        
+       
         if w > 5 and h > 5:  # Minimum size check
             # Remove freehand path
             self.scene.removeItem(self.freehand_item)
             self.freehand_item = None
-            
+           
             # Create region from freehand selection
             exclude_masks = self.main_window.exclude_mask_cb.isChecked() if self.main_window else False
             self.create_region_from_freehand_selection(x, y, w, h, bg_rect, exclude_masks)
@@ -584,55 +585,55 @@ class InteractiveCanvas(QGraphicsView):
             self.scene.removeItem(self.freehand_item)
             self.freehand_item = None
             self.region_placed.emit({'has_selection': False})
-    
+   
     def create_region_from_selection(self, x, y, w, h, bg_rect, exclude_masks=False):
         """Create a draggable region from selection coordinates"""
         # Extract the selected region from the background image
         region_pixmap = self.background_item.pixmap().copy(x, y, w, h)
-        
+       
         # Create a mask for the region (fully opaque)
         mask_pixmap = QPixmap(w, h)
         mask_pixmap.fill(Qt.white)
-        
+       
         # Create region data
         region_data = {
             'type': 'selected_region',
             'source': f'region_{len(self.region_items)}',
             'original_rect': (x, y, w, h)
         }
-        
+       
         # Create region item
         region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data, exclude_masks)
-        
+       
         # Position at center of canvas
         canvas_center_x = bg_rect.width() / 2 - w / 2
         canvas_center_y = bg_rect.height() / 2 - h / 2
         region_item.setPos(canvas_center_x, canvas_center_y)
-        
+       
         # Add to scene
         self.scene.addItem(region_item)
         self.region_items.append(region_item)
         self.selected_region = region_item
-        
+       
         # Emit signal
         self.region_placed.emit({
             'type': 'selected_region',
             'position': (region_item.x(), region_item.y())
         })
-    
+   
     def create_region_from_freehand_selection(self, x, y, w, h, bg_rect, exclude_masks=False):
         """Create a draggable region from freehand selection"""
         # Extract the background region
         background_region = self.background_item.pixmap().copy(x, y, w, h)
-        
+       
         # Create a mask based on the freehand path
         mask_pixmap = QPixmap(w, h)
         mask_pixmap.fill(Qt.transparent)
-        
+       
         # Create painter for mask
         mask_painter = QPainter(mask_pixmap)
         mask_painter.setRenderHint(QPainter.Antialiasing)
-        
+       
         # Create a path relative to the region coordinates
         relative_path = QPainterPath()
         if self.freehand_points:
@@ -641,19 +642,19 @@ class InteractiveCanvas(QGraphicsView):
             relative_x = first_point.x() - bg_rect.x() - x
             relative_y = first_point.y() - bg_rect.y() - y
             relative_path.moveTo(relative_x, relative_y)
-            
+           
             for point in self.freehand_points[1:]:
                 rel_x = point.x() - bg_rect.x() - x
                 rel_y = point.y() - bg_rect.y() - y
                 relative_path.lineTo(rel_x, rel_y)
-        
+       
         # Close the path to create a filled shape
         relative_path.closeSubpath()
-        
+       
         # Fill the mask path with white (opaque)
         mask_painter.fillPath(relative_path, QColor(255, 255, 255))
         mask_painter.end()
-        
+       
         # Convert mask to numpy array for processing
         mask_image = mask_pixmap.toImage()
         mask_np = np.zeros((h, w), dtype=np.uint8)
@@ -661,7 +662,7 @@ class InteractiveCanvas(QGraphicsView):
             for x in range(w):
                 pixel = mask_image.pixel(x, y)
                 mask_np[y, x] = (pixel >> 24) & 0xFF  # Get alpha channel
-        
+       
         # Convert background to numpy array
         bg_image = background_region.toImage()
         bg_np = np.zeros((h, w, 3), dtype=np.uint8)
@@ -671,16 +672,16 @@ class InteractiveCanvas(QGraphicsView):
                 bg_np[y, x, 0] = (pixel >> 16) & 0xFF  # Red
                 bg_np[y, x, 1] = (pixel >> 8) & 0xFF   # Green
                 bg_np[y, x, 2] = pixel & 0xFF          # Blue
-        
+       
         # Create RGBA image with transparency
         rgba_np = np.zeros((h, w, 4), dtype=np.uint8)
         rgba_np[:, :, :3] = bg_np  # RGB channels
         rgba_np[:, :, 3] = mask_np  # Alpha channel from mask
-        
+       
         # Convert back to QPixmap
         qimage = QImage(rgba_np.tobytes(), w, h, w * 4, QImage.Format_RGBA8888)
         region_pixmap = QPixmap.fromImage(qimage)
-        
+       
         # Create region data
         region_data = {
             'type': 'freehand_region',
@@ -688,44 +689,44 @@ class InteractiveCanvas(QGraphicsView):
             'original_rect': (x, y, w, h),
             'freehand_points': [(p.x() - bg_rect.x(), p.y() - bg_rect.y()) for p in self.freehand_points]
         }
-        
+       
         # Create region item
         region_item = SelectedRegionItem(region_pixmap, mask_pixmap, region_data, exclude_masks)
-        
+       
         # Position at center of canvas
         canvas_center_x = bg_rect.width() / 2 - w / 2
         canvas_center_y = bg_rect.height() / 2 - h / 2
         region_item.setPos(canvas_center_x, canvas_center_y)
-        
+       
         # Add to scene
         self.scene.addItem(region_item)
         self.region_items.append(region_item)
         self.selected_region = region_item
-        
+       
         # Clear freehand data
         self.freehand_path = None
         self.freehand_points = []
-        
+       
         # Emit signal
         self.region_placed.emit({
             'type': 'freehand_region',
             'position': (region_item.x(), region_item.y())
         })
-    
+   
     def copy_selection(self):
         """Copy the current selection as a draggable region (legacy method)"""
         if not self.current_selection or not self.background_item:
             return
-            
+           
         x, y, w, h = self.current_selection['rect']
         bg_rect = self.current_selection['background_rect']
-        
+       
         # Create region from selection
         self.create_region_from_selection(x, y, w, h, bg_rect)
-        
+       
         # Clear current selection
         self.current_selection = None
-    
+   
     def clear_selection(self):
         """Clear the current selection"""
         if self.selection_item:
@@ -738,66 +739,66 @@ class InteractiveCanvas(QGraphicsView):
         self.freehand_path = None
         self.freehand_points = []
         self.region_placed.emit({'has_selection': False})
-    
+   
     def remove_selected_region(self):
         """Remove the selected region"""
         try:
             if not self.scene:
                 return
             selected_items = [item for item in self.scene.selectedItems() if isinstance(item, SelectedRegionItem)]
-            
+           
             if not selected_items and self.selected_region and self.selected_region in self.region_items:
                 selected_items = [self.selected_region]
-            
+           
             if not selected_items:
                 return
-            
+           
             # Remove all selected region items
             for item in selected_items:
                 if item in self.region_items:
                     self.scene.removeItem(item)
                     self.region_items.remove(item)
-            
+           
             # Update current selection reference
             remaining_selected = [item for item in self.scene.selectedItems() if isinstance(item, SelectedRegionItem)]
             self.selected_region = remaining_selected[-1] if remaining_selected else None
         except RuntimeError:
             # Scene has been deleted, ignore
             pass
-    
+   
     def clear_regions(self):
         """Clear all regions from canvas"""
         for item in list(self.region_items):
             self.scene.removeItem(item)
         self.region_items.clear()
         self.selected_region = None
-    
+   
     def create_eraser_cursor(self, size):
         """Create a custom eraser cursor"""
         # Create a pixmap for the eraser cursor
         pixmap = QPixmap(size + 4, size + 4)
         pixmap.fill(Qt.transparent)
-        
+       
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
-        
+       
         # Draw eraser shape (rounded rectangle)
         pen = QPen(QColor(100, 100, 100), 2)
         painter.setPen(pen)
         painter.setBrush(QBrush(QColor(200, 200, 200, 180)))
-        
+       
         # Draw the eraser body
         painter.drawRoundedRect(2, 2, size, size, 3, 3)
-        
+       
         # Draw a small highlight
         painter.setPen(QPen(QColor(255, 255, 255), 1))
         painter.drawLine(4, 4, size - 2, 4)
-        
+       
         painter.end()
-        
+       
         # Create cursor with hotspot at center
         return QCursor(pixmap, size // 2, size // 2)
-    
+   
     def set_brush_settings(self, enabled, mode, size, opacity, color):
         """Update brush settings"""
         self.brush_enabled = enabled
@@ -805,7 +806,7 @@ class InteractiveCanvas(QGraphicsView):
         self.brush_size = size
         self.brush_opacity = opacity
         self.brush_color = color
-        
+       
         # Update cursor based on mode
         if enabled:
             if mode == "Erase":
@@ -820,157 +821,221 @@ class InteractiveCanvas(QGraphicsView):
             self.setCursor(Qt.CrossCursor)
         else:
             self.setCursor(Qt.ArrowCursor)
-        
+       
     def get_augmented_image(self):
         """Generate the final augmented image by painting the scene at scaled resolution."""
         if self.background_tensor is None or self.original_background_tensor is None:
             return None, None
-        
+       
         # Use scaled image dimensions (75% of original)
         display_h, display_w = self.background_tensor.shape[1], self.background_tensor.shape[2]
-        
-        # No scaling needed - use display dimensions directly
-        scale_x = 1.0
-        scale_y = 1.0
-        
+       
         # Render color image at scaled size
         color_img = QImage(display_w, display_h, QImage.Format_RGB888)
         color_img.fill(QColor(0, 0, 0))
         painter = QPainter(color_img)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        
+        painter.setRenderHint(QPainter.Antialiasing)
+       
         # Draw background at scaled size
         if self.background_item:
             painter.setOpacity(1.0)
-            # Use background pixmap directly (already at correct size)
             bg_pixmap = self.background_item.pixmap()
             painter.drawPixmap(0, 0, bg_pixmap)
-        
+       
         # Draw paint layer at scaled size
         if self.paint_layer_item:
             painter.setOpacity(1.0)
             paint_pixmap = self.paint_layer_item.pixmap()
             painter.drawPixmap(0, 0, paint_pixmap)
-        
+       
         # Draw defects with their current opacity at scaled size
         for item in self.defect_items:
             painter.setOpacity(float(item.opacity))
-            # Use position and size directly (already at correct scale)
             x = int(item.x())
             y = int(item.y())
             painter.drawPixmap(x, y, item.pixmap())
-        
+       
         # Draw regions with their current opacity at scaled size
         for item in self.region_items:
             painter.setOpacity(float(item.opacity))
-            # Use position and size directly (already at correct scale)
             x = int(item.x())
             y = int(item.y())
             painter.drawPixmap(x, y, item.pixmap())
         painter.end()
-        
+       
         # Render mask (grayscale) at scaled size
         mask_img = QImage(display_w, display_h, QImage.Format_Grayscale8)
         mask_img.fill(0)
-        
-        # Only draw masks for items that were not created in exclude_masks mode
+       
         mp = QPainter(mask_img)
         mp.setRenderHint(QPainter.SmoothPixmapTransform)
+        mp.setRenderHint(QPainter.Antialiasing)
         for item in self.defect_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Use position and size directly (already at correct scale)
                 x = int(item.x())
                 y = int(item.y())
                 mp.drawPixmap(x, y, item.mask_pixmap)
         for item in self.region_items:
             if not item.exclude_masks:
                 mp.setOpacity(1.0)
-                # Use position and size directly (already at correct scale)
                 x = int(item.x())
                 y = int(item.y())
                 mp.drawPixmap(x, y, item.mask_pixmap)
         mp.end()
-        
-        # Convert to tensors using safer method for large images
-        # Convert QImage to PIL Image first to avoid memory access issues with large images
-        color_pil = Image.frombytes('RGB', (display_w, display_h), color_img.bits(), 'raw', 'RGB')
-        mask_pil = Image.frombytes('L', (display_w, display_h), mask_img.bits(), 'raw', 'L')
-        
-        # Convert to numpy arrays
-        color_np = np.array(color_pil)
-        mask_np = np.array(mask_pil)
-        
-        color_tensor = torch.from_numpy(color_np).float().permute(2, 0, 1) / 255.0
-        mask_tensor = torch.from_numpy(mask_np).float().unsqueeze(0) / 255.0
-        
+       
+        # Convert to tensors using improved method
+        color_tensor = self.qimage_to_tensor(color_img, channels=3)
+        mask_tensor = self.qimage_to_tensor(mask_img, channels=1)
+       
         return color_tensor, mask_tensor
-        
+
+    def qimage_to_tensor(self, qimage, channels=3):
+        """Robust conversion from QImage to tensor using QBuffer"""
+        try:
+            # Method 1: Direct memory access (for smaller images)
+            width = qimage.width()
+            height = qimage.height()
+           
+            if channels == 3:
+                qimage = qimage.convertToFormat(QImage.Format_RGB888)
+                bytes_per_line = qimage.bytesPerLine()
+               
+                # Check if we can safely access the buffer
+                expected_size = height * bytes_per_line
+                ptr = qimage.bits()
+                ptr.setsize(expected_size)
+               
+                # Create array with proper stride handling
+                arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+                # Extract only the actual image data (remove padding if any)
+                arr = arr[:, :width*3].reshape((height, width, 3))
+               
+            else:
+                qimage = qimage.convertToFormat(QImage.Format_Grayscale8)
+                bytes_per_line = qimage.bytesPerLine()
+               
+                expected_size = height * bytes_per_line
+                ptr = qimage.bits()
+                ptr.setsize(expected_size)
+               
+                arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+                # Extract only the actual image data
+                arr = arr[:, :width].reshape((height, width))
+               
+        except Exception as e:
+            print(f"Direct method failed: {e}, falling back to QBuffer method")
+            # Method 2: Fallback using QBuffer (more reliable for large images)
+            return self.qimage_to_tensor_buffer(qimage, channels)
+       
+        # Convert to tensor
+        arr = arr.copy()  # Ensure we own the data
+        if channels == 3:
+            tensor = torch.from_numpy(arr).float().permute(2, 0, 1) / 255.0
+        else:
+            tensor = torch.from_numpy(arr).float().unsqueeze(0) / 255.0
+       
+        return tensor
+
+    def qimage_to_tensor_buffer(self, qimage, channels=3):
+        """Fallback method using QBuffer for problematic large images"""
+        # Convert QImage to PNG bytes using QBuffer
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.WriteOnly)
+       
+        # Save as PNG (lossless)
+        success = qimage.save(buffer, "PNG")
+        if not success:
+            raise RuntimeError("Failed to save QImage to buffer")
+       
+        buffer.close()
+       
+        # Load with PIL
+        pil_image = Image.open(io.BytesIO(byte_array.data()))
+       
+        # Convert to numpy
+        if channels == 1:
+            if pil_image.mode != 'L':
+                pil_image = pil_image.convert('L')
+            arr = np.array(pil_image)
+            tensor = torch.from_numpy(arr).float().unsqueeze(0) / 255.0
+        else:
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+            arr = np.array(pil_image)
+            tensor = torch.from_numpy(arr).float().permute(2, 0, 1) / 255.0
+       
+        return tensor
+       
     def pixmap_to_numpy(self, pixmap, grayscale=False):
-        """Convert QPixmap to numpy array using safer method for large images"""
+        """Convert QPixmap to numpy array"""
         qimage = pixmap.toImage()
         width, height = qimage.width(), qimage.height()
-        
+       
         if grayscale:
             qimage = qimage.convertToFormat(QImage.Format_Grayscale8)
-            pil_image = Image.frombytes('L', (width, height), qimage.bits(), 'raw', 'L')
-            arr = np.array(pil_image)
+            ptr = qimage.bits()
+            ptr.setsize(height * width)
+            arr = np.frombuffer(ptr, np.uint8).reshape((height, width))
         else:
             qimage = qimage.convertToFormat(QImage.Format_RGB888)
-            pil_image = Image.frombytes('RGB', (width, height), qimage.bits(), 'raw', 'RGB')
-            arr = np.array(pil_image)
-            
+            ptr = qimage.bits()
+            ptr.setsize(height * width * 3)
+            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 3))
+           
         return arr
-        
+       
     def apply_defect_to_image(self, image, mask, defect, defect_mask, x, y, opacity):
         """Apply defect to image at position"""
         _, h_img, w_img = image.shape
         h_def, w_def = defect_mask.shape if len(defect_mask.shape) == 2 else defect_mask.shape[:2]
-        
+       
         # Calculate valid region
         x_start = max(0, x)
         y_start = max(0, y)
         x_end = min(w_img, x + w_def)
         y_end = min(h_img, y + h_def)
-        
+       
         # Calculate defect region
         def_x_start = max(0, -x)
         def_y_start = max(0, -y)
         def_x_end = def_x_start + (x_end - x_start)
         def_y_end = def_y_start + (y_end - y_start)
-        
+       
         if x_end > x_start and y_end > y_start:
             # Extract regions
             img_region = image[:, y_start:y_end, x_start:x_end]
             def_region = defect[def_y_start:def_y_end, def_x_start:def_x_end]
             mask_region = defect_mask[def_y_start:def_y_end, def_x_start:def_x_end]
-            
+           
             # Convert to tensors
             def_tensor = torch.from_numpy(def_region).float() / 255.0
             if len(def_tensor.shape) == 3:
                 def_tensor = def_tensor.permute(2, 0, 1)
-            
+           
             mask_tensor = torch.from_numpy(mask_region).float() / 255.0
             if len(mask_tensor.shape) == 2:
                 mask_tensor = mask_tensor.unsqueeze(0)
-                
+               
             # Simple alpha blend
             mask_3ch = mask_tensor.repeat(3, 1, 1)
             blend_mask = mask_3ch * opacity
             img_region[:] = img_region * (1 - blend_mask) + def_tensor * blend_mask
-            
+           
             # Update mask
             mask[0, y_start:y_end, x_start:x_end] = torch.max(
                 mask[0, y_start:y_end, x_start:x_end],
                 mask_tensor[0]
             )
 
-    
+   
 
 
 class DefectPlacementTool(QMainWindow):
     """Main application window"""
-    
+   
     def __init__(self):
         super().__init__()
         self.target_images_dir = None
@@ -983,27 +1048,27 @@ class DefectPlacementTool(QMainWindow):
         # Per-image augmentation state cache
         self.augmentation_states: Dict[str, Dict] = {}
         self.has_unsaved_changes = False
-        
+       
         # Paint layer cache
         self.paint_layer_cache: Dict[str, QPixmap] = {}
-        
+       
         # Track which images have been saved
         self.saved_images: set = set()
-        
+       
         self.init_ui()
-        
+       
     def init_ui(self):
         """Initialize the user interface"""
         self.setWindowTitle("DefectPaste - Interactive Defect Placement Tool")
         self.setGeometry(100, 100, 1600, 1000)
-        
+       
         # Create central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+       
         # Main layout
         main_layout = QHBoxLayout(central_widget)
-        
+       
         # Left panel - Controls (with scroll area)
         left_panel_content = self.create_left_panel()
         left_scroll = QScrollArea()
@@ -1011,7 +1076,7 @@ class DefectPlacementTool(QMainWindow):
         left_scroll.setWidgetResizable(True)
         left_scroll.setMaximumWidth(450)
         left_scroll.setMinimumWidth(350)
-        
+       
         # Center - Canvas
         self.canvas = InteractiveCanvas(self)
         self.canvas.defect_placed.connect(self.on_defect_placed)
@@ -1019,85 +1084,85 @@ class DefectPlacementTool(QMainWindow):
         self.canvas.paint_changed.connect(self._mark_unsaved)
         # Track changes for unsaved prompt
         self.canvas.scene.selectionChanged.connect(self._mark_unsaved)
-        
+       
         # Right panel - Defect library
         right_panel = self.create_right_panel()
-        
+       
         # Add to layout with splitter
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_scroll)
         splitter.addWidget(self.canvas)
         splitter.addWidget(right_panel)
         splitter.setSizes([400, 800, 400])
-        
+       
         main_layout.addWidget(splitter)
-        
+       
         # Create toolbar
         self.create_toolbar()
-        
+       
         # Status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready - Load target images and defect masks to begin")
-        
+       
     def create_toolbar(self):
         """Create main toolbar"""
         toolbar = QToolBar()
         self.addToolBar(toolbar)
-        
+       
         # Load target images directory
         load_targets_action = toolbar.addAction("Load Target Images")
         load_targets_action.triggered.connect(self.load_target_images)
-        
+       
         # Load defect images directory
         load_defect_images_action = toolbar.addAction("Load Defect Images")
         load_defect_images_action.triggered.connect(self.load_defect_images)
-        
+       
         # Load defect masks directory
         load_defect_masks_action = toolbar.addAction("Load Defect Masks")
         load_defect_masks_action.triggered.connect(self.load_defect_masks)
-        
+       
         toolbar.addSeparator()
-        
+       
         # Save augmented image
         save_action = toolbar.addAction("Save Augmented")
         save_action.triggered.connect(self.save_augmented_image)
-        
+       
         toolbar.addSeparator()
-        
+       
         # Save all augmentations
         save_all_action = toolbar.addAction("Save All Augmented…")
         save_all_action.triggered.connect(self.save_all_augmentations)
-        
+       
         # Clear all
         clear_action = toolbar.addAction("Clear All")
         clear_action.triggered.connect(self.clear_all)
-        
+       
     def create_left_panel(self):
         """Create left control panel"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setSpacing(10)  # Add spacing between group boxes
         layout.setContentsMargins(5, 5, 5, 5)  # Add margins
-        
+       
         # Target image selection
         target_group = QGroupBox("Target Image")
         target_layout = QVBoxLayout()
-        
+       
         self.target_list = QListWidget()
         self.target_list.itemClicked.connect(self.on_target_selected)
         target_layout.addWidget(QLabel("Select target image:"))
         target_layout.addWidget(self.target_list)
-        
+       
         # [Removed] Object mask checkbox
-        
+       
         target_group.setLayout(target_layout)
         layout.addWidget(target_group)
-        
+       
         # Transformation controls
         transform_group = QGroupBox("Defect Transformation")
         transform_layout = QVBoxLayout()
-        
+       
         # Scale slider
         transform_layout.addWidget(QLabel("Scale:"))
         self.scale_slider = QSlider(Qt.Horizontal)
@@ -1109,7 +1174,7 @@ class DefectPlacementTool(QMainWindow):
         scale_layout.addWidget(self.scale_slider)
         scale_layout.addWidget(self.scale_label)
         transform_layout.addLayout(scale_layout)
-        
+       
         # Rotation slider
         transform_layout.addWidget(QLabel("Rotation:"))
         self.rotation_slider = QSlider(Qt.Horizontal)
@@ -1121,7 +1186,7 @@ class DefectPlacementTool(QMainWindow):
         rotation_layout.addWidget(self.rotation_slider)
         rotation_layout.addWidget(self.rotation_label)
         transform_layout.addLayout(rotation_layout)
-        
+       
         # Opacity slider
         transform_layout.addWidget(QLabel("Opacity:"))
         self.opacity_slider = QSlider(Qt.Horizontal)
@@ -1133,60 +1198,60 @@ class DefectPlacementTool(QMainWindow):
         opacity_layout.addWidget(self.opacity_slider)
         opacity_layout.addWidget(self.opacity_label)
         transform_layout.addLayout(opacity_layout)
-        
+       
         # [Removed] Live preview toggle
-        
+       
         transform_group.setLayout(transform_layout)
         layout.addWidget(transform_group)
-        
+       
         # [Removed] Blend mode controls
-        
+       
         # Selection Tool
         selection_group = QGroupBox("Selection Tool")
         selection_layout = QVBoxLayout()
-        
+       
         # Enable/Disable selection tool
         self.selection_enabled_cb = QCheckBox("Enable Selection Tool")
         self.selection_enabled_cb.toggled.connect(self.toggle_selection_tool)
         selection_layout.addWidget(self.selection_enabled_cb)
-        
+       
         # Selection mode
         selection_layout.addWidget(QLabel("Selection Mode:"))
         self.selection_mode = QComboBox()
         self.selection_mode.addItems(["Rectangle", "Freehand"])
         self.selection_mode.currentTextChanged.connect(self.on_selection_mode_changed)
         selection_layout.addWidget(self.selection_mode)
-        
+       
         # Copy selection button
         self.copy_selection_btn = QPushButton("Copy Selection")
         self.copy_selection_btn.clicked.connect(self.copy_selection)
         self.copy_selection_btn.setEnabled(False)
         selection_layout.addWidget(self.copy_selection_btn)
-        
+       
         # Clear selection button
         self.clear_selection_btn = QPushButton("Clear Selection")
         self.clear_selection_btn.clicked.connect(self.clear_selection)
         selection_layout.addWidget(self.clear_selection_btn)
-        
+       
         # Exclude mask checkbox
         self.exclude_mask_cb = QCheckBox("Exclude masks from output")
         self.exclude_mask_cb.setToolTip("When checked, masks will not be saved to JSON file or binary image output")
         selection_layout.addWidget(self.exclude_mask_cb)
-        
+       
         selection_group.setLayout(selection_layout)
         layout.addWidget(selection_group)
-        
+       
         # Paint Brush Tool
         brush_group = QGroupBox("Paint Brush Tool")
         brush_layout = QVBoxLayout()
-        
+       
         # Brush mode selection
         brush_layout.addWidget(QLabel("Brush Mode:"))
         self.brush_mode = QComboBox()
         self.brush_mode.addItems(["Paint", "Erase"])
         self.brush_mode.currentTextChanged.connect(self.on_brush_mode_changed)
         brush_layout.addWidget(self.brush_mode)
-        
+       
         # Brush size
         brush_layout.addWidget(QLabel("Brush Size:"))
         self.brush_size_slider = QSlider(Qt.Horizontal)
@@ -1198,7 +1263,7 @@ class DefectPlacementTool(QMainWindow):
         brush_size_layout.addWidget(self.brush_size_slider)
         brush_size_layout.addWidget(self.brush_size_label)
         brush_layout.addLayout(brush_size_layout)
-        
+       
         # Brush opacity
         brush_layout.addWidget(QLabel("Brush Opacity:"))
         self.brush_opacity_slider = QSlider(Qt.Horizontal)
@@ -1210,115 +1275,115 @@ class DefectPlacementTool(QMainWindow):
         brush_opacity_layout.addWidget(self.brush_opacity_slider)
         brush_opacity_layout.addWidget(self.brush_opacity_label)
         brush_layout.addLayout(brush_opacity_layout)
-        
+       
         # Brush color
         brush_layout.addWidget(QLabel("Brush Color:"))
         self.brush_color_btn = QPushButton("Choose Color")
         self.brush_color_btn.clicked.connect(self.choose_brush_color)
         self.brush_color_btn.setStyleSheet("background-color: black; color: white;")
         brush_layout.addWidget(self.brush_color_btn)
-        
+       
         # Enable/Disable brush tool
         self.brush_enabled_cb = QCheckBox("Enable Paint Brush")
         self.brush_enabled_cb.toggled.connect(self.toggle_brush_tool)
         brush_layout.addWidget(self.brush_enabled_cb)
-        
+       
         brush_group.setLayout(brush_layout)
         layout.addWidget(brush_group)
-        
+       
         # Actions
         actions_group = QGroupBox("Actions")
         actions_layout = QVBoxLayout()
-        
+       
         self.remove_btn = QPushButton("Remove Selected")
         self.remove_btn.clicked.connect(self.remove_selected_defect)
         self.remove_btn.clicked.connect(self._mark_unsaved)
         actions_layout.addWidget(self.remove_btn)
-        
+       
         self.clear_btn = QPushButton("Clear All Defects")
         self.clear_btn.clicked.connect(self.clear_all_defects)
         self.clear_btn.clicked.connect(self._mark_unsaved)
         actions_layout.addWidget(self.clear_btn)
-        
+       
         self.clear_paint_btn = QPushButton("Clear Paint Layer")
         self.clear_paint_btn.clicked.connect(self.clear_paint_layer)
         self.clear_paint_btn.clicked.connect(self._mark_unsaved)
         actions_layout.addWidget(self.clear_paint_btn)
-        
+       
         # [Removed] Preview Result button
-        
+       
         actions_group.setLayout(actions_layout)
         layout.addWidget(actions_group)
-        
+       
         return panel
-        
+       
     def create_right_panel(self):
         """Create right defect library panel"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        
+       
         # Defect library
         defect_group = QGroupBox("Defect Library")
         defect_layout = QVBoxLayout()
-        
+       
         # Filter by type
         defect_layout.addWidget(QLabel("Filter by type:"))
         self.defect_filter = QComboBox()
         self.defect_filter.addItem("All")
         self.defect_filter.currentTextChanged.connect(self.filter_defects)
         defect_layout.addWidget(self.defect_filter)
-        
+       
         # Defect list
         defect_layout.addWidget(QLabel("Available defects:"))
         self.defect_list = QListWidget()
         self.defect_list.itemDoubleClicked.connect(self.add_defect_to_canvas)
         defect_layout.addWidget(self.defect_list)
-        
+       
         # Add defect button
         self.add_defect_btn = QPushButton("Add Selected Defect")
         self.add_defect_btn.clicked.connect(self.add_defect_to_canvas)
         self.add_defect_btn.clicked.connect(self._mark_unsaved)
         defect_layout.addWidget(self.add_defect_btn)
-        
+       
         defect_group.setLayout(defect_layout)
         layout.addWidget(defect_group)
-        
+       
         # Statistics
         stats_group = QGroupBox("Statistics")
         stats_layout = QVBoxLayout()
-        
+       
         self.stats_label = QLabel("No dataset loaded")
         stats_layout.addWidget(self.stats_label)
-        
+       
         stats_group.setLayout(stats_layout)
         layout.addWidget(stats_group)
-        
+       
         return panel
-        
+       
     def load_target_images(self):
         """Load target images from directory"""
         # Check for unsaved changes before loading new dataset
         if not self._check_unsaved_changes("loading new target images"):
             return
-            
+           
         self.target_images_dir = QFileDialog.getExistingDirectory(
             self, "Select Target Images Directory", os.getcwd()
         )
-        
+       
         if not self.target_images_dir:
             return
-            
+           
         # Scan for image files
         self.target_images = []
         for root, dirs, files in os.walk(self.target_images_dir):
             for file in files:
                 if file.lower().endswith(('.png', '.jpg', '.jpeg')):
                     self.target_images.append(os.path.join(root, file))
-        
+       
         if not self.target_images:
             QMessageBox.warning(self, "Warning", "No image files found in the selected directory.")
             return
-            
+           
         # Populate target list
         self.target_list.clear()
         for img_path in self.target_images[:50]:  # Limit to 50 for UI
@@ -1326,22 +1391,22 @@ class DefectPlacementTool(QMainWindow):
             item = QListWidgetItem(img_name)
             item.setData(Qt.UserRole, img_path)
             self.target_list.addItem(item)
-            
+           
         self.status_bar.showMessage(f"Loaded {len(self.target_images)} target images")
-        
+       
     def load_defect_images(self):
         """Load defect images from directory"""
         # Check for unsaved changes before loading new dataset
         if not self._check_unsaved_changes("loading new defect images"):
             return
-            
+           
         self.defect_images_dir = QFileDialog.getExistingDirectory(
             self, "Select Defect Images Directory", os.getcwd()
         )
-        
+       
         if not self.defect_images_dir:
             return
-            
+           
         # Scan for image files
         self.defect_images = []
         defect_types = set()
@@ -1353,30 +1418,30 @@ class DefectPlacementTool(QMainWindow):
                     # Extract defect type from directory name
                     defect_type = os.path.basename(root) if root != self.defect_images_dir else 'defect'
                     defect_types.add(defect_type)
-        
+       
         if not self.defect_images:
             QMessageBox.warning(self, "Warning", "No defect image files found in the selected directory.")
             return
-            
+           
         # Update stats if masks are also loaded
         if hasattr(self, 'defect_masks') and self.defect_masks:
             self._update_stats_display()
-            
+           
         self.status_bar.showMessage(f"Loaded {len(self.defect_images)} defect images")
-        
+       
     def load_defect_masks(self):
         """Load defect masks from directory"""
         # Check for unsaved changes before loading new dataset
         if not self._check_unsaved_changes("loading new defect masks"):
             return
-            
+           
         self.defect_masks_dir = QFileDialog.getExistingDirectory(
             self, "Select Defect Masks Directory", os.getcwd()
         )
-        
+       
         if not self.defect_masks_dir:
             return
-            
+           
         # Scan for mask files
         self.defect_masks = []
         defect_types = set()
@@ -1388,11 +1453,11 @@ class DefectPlacementTool(QMainWindow):
                     # Extract defect type from directory name
                     defect_type = os.path.basename(root) if root != self.defect_masks_dir else 'defect'
                     defect_types.add(defect_type)
-        
+       
         if not self.defect_masks:
             QMessageBox.warning(self, "Warning", "No mask files found in the selected directory.")
             return
-            
+           
         # Populate defect list
         self.defect_list.clear()
         for mask_path in self.defect_masks:
@@ -1400,29 +1465,29 @@ class DefectPlacementTool(QMainWindow):
             # Extract defect type from directory
             relative_path = os.path.relpath(mask_path, self.defect_masks_dir)
             defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
-            
+           
             item_text = f"{defect_type} - {mask_name}"
             item = QListWidgetItem(item_text)
             item.setData(Qt.UserRole, mask_path)
             self.defect_list.addItem(item)
-            
+           
         # Update filter
         self.defect_filter.clear()
         self.defect_filter.addItem("All")
         for dtype in sorted(defect_types):
             self.defect_filter.addItem(dtype)
-            
+           
         # Update stats
         self._update_stats_display()
-        
+       
         self.status_bar.showMessage(f"Loaded {len(self.defect_masks)} defect masks")
-    
+   
     def _update_stats_display(self):
         """Update the statistics display"""
         target_count = len(self.target_images) if hasattr(self, 'target_images') else 0
         defect_image_count = len(self.defect_images) if hasattr(self, 'defect_images') else 0
         defect_mask_count = len(self.defect_masks) if hasattr(self, 'defect_masks') else 0
-        
+       
         # Collect all defect types from both images and masks
         all_types = set()
         if hasattr(self, 'defect_images') and self.defect_images:
@@ -1435,7 +1500,7 @@ class DefectPlacementTool(QMainWindow):
                 relative_path = os.path.relpath(mask_path, self.defect_masks_dir)
                 defect_type = os.path.dirname(relative_path) if os.path.dirname(relative_path) else 'defect'
                 all_types.add(defect_type)
-        
+       
         stats_text = f"Target Images: {target_count}\n"
         stats_text += f"Defect Images: {defect_image_count}\n"
         stats_text += f"Defect Masks: {defect_mask_count}\n"
@@ -1443,75 +1508,75 @@ class DefectPlacementTool(QMainWindow):
             stats_text += f"Types: {', '.join(sorted(all_types))}"
         else:
             stats_text += "No defect data loaded"
-            
+           
         self.stats_label.setText(stats_text)
-            
+           
     def on_target_selected(self, item):
         """Handle target image selection"""
         if not self.target_images:
             return
-        
+       
         # Check for unsaved changes before switching
         if not self._check_unsaved_changes("switching images"):
             return
-            
+           
         try:
             # Save current state before switching
             self.save_current_state_to_cache()
-            
+           
             # Get image path from item data
             image_path = item.data(Qt.UserRole)
             self.current_image_path = image_path
-            
+           
             # Load and display the image
             resized_tensor, original_tensor = self._load_image_tensor(image_path)
             self.canvas.set_background_image(resized_tensor, original_tensor)
-            
+           
             # Restore cached defects for this image, if any
             self.restore_state_from_cache()
-            
+           
             image_name = os.path.basename(image_path)
             self.status_bar.showMessage(f"Loaded target: {image_name}")
-            
+           
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load target image:\n{str(e)}")
-    
+   
     def _load_image_tensor(self, image_path):
         """Load and convert image to tensor while preserving aspect ratio"""
         image = Image.open(image_path).convert('RGB')
-        
+       
         # Get original dimensions
         original_width, original_height = image.size
-        
+       
         # Calculate new dimensions while preserving aspect ratio
         # Scale to 75% of original size
         scale_factor = 0.75
         new_width = int(original_width * scale_factor)
         new_height = int(original_height * scale_factor)
-        
+       
         # Ensure minimum size for very small images
         new_width = max(new_width, 64)
         new_height = max(new_height, 64)
-        
+       
         # Create original size tensor
         original_transform = transforms.Compose([
             transforms.ToTensor()
         ])
         original_tensor = original_transform(image)
-        
+       
         # Create resized tensor for display
         resize_transform = transforms.Compose([
             transforms.Resize((new_height, new_width)),
             transforms.ToTensor()
         ])
         resized_tensor = resize_transform(image)
-        
+       
         return resized_tensor, original_tensor
-    
+   
     def _load_mask_tensor(self, mask_path, target_size=None):
         """Load and convert mask to tensor, optionally resizing to match target size"""
         mask = Image.open(mask_path).convert('L')
-        
+       
         if target_size is not None:
             # Resize to match target image size
             transform = transforms.Compose([
@@ -1525,18 +1590,18 @@ class DefectPlacementTool(QMainWindow):
             scale_factor = 0.75
             new_width = int(original_width * scale_factor)
             new_height = int(original_height * scale_factor)
-            
+           
             new_width = max(new_width, 64)
             new_height = max(new_height, 64)
-            
+           
             transform = transforms.Compose([
                 transforms.Resize((new_height, new_width)),
                 transforms.ToTensor()
             ])
-        
+       
         mask_tensor = transform(mask)
         return (mask_tensor > 0.5).float()
-    
+   
     def save_current_state_to_cache(self):
         """Persist current canvas defect items and paint layer into the cache for the active image."""
         if not self.current_image_path:
@@ -1556,7 +1621,7 @@ class DefectPlacementTool(QMainWindow):
                 'opacity': float(item.opacity),
                 'exclude_masks': item.exclude_masks,
             })
-        
+       
         regions_state = []
         for item in self.canvas.region_items:
             regions_state.append({
@@ -1570,7 +1635,7 @@ class DefectPlacementTool(QMainWindow):
                 'opacity': float(item.opacity),
                 'exclude_masks': item.exclude_masks,
             })
-        
+       
         # Save paint layer if it exists and has content
         paint_layer_data = None
         if self.canvas.paint_layer and not self.canvas.paint_layer.isNull():
@@ -1584,22 +1649,22 @@ class DefectPlacementTool(QMainWindow):
                         break
                 if has_content:
                     break
-            
+           
             if has_content:
                 paint_layer_data = self.canvas.paint_layer.copy()
-        
+       
         self.augmentation_states[key] = {
             'items': items_state,
             'regions': regions_state,
             'paint_layer': paint_layer_data
         }
-        
+       
         # Also cache the paint layer separately for quick access
         if paint_layer_data:
             self.paint_layer_cache[key] = paint_layer_data
         elif key in self.paint_layer_cache:
             del self.paint_layer_cache[key]
-    
+   
     def restore_state_from_cache(self):
         """Restore cached defects and paint layer for the current image if present."""
         if not self.current_image_path:
@@ -1612,18 +1677,18 @@ class DefectPlacementTool(QMainWindow):
         self.canvas.clear_defects()
         self.canvas.clear_regions()
         self.canvas.clear_paint_layer()
-        
+       
         # Restore paint layer if it exists
         paint_layer_data = state.get('paint_layer')
         if paint_layer_data and not paint_layer_data.isNull():
             self.canvas.paint_layer = paint_layer_data.copy()
             self.canvas.paint_layer_item.setPixmap(self.canvas.paint_layer)
-        
+       
         for entry in state.get('items', []):
             # Try to find the mask by path or by type and source
             mask_path = entry.get('mask_path')
             defect_image_path = entry.get('defect_image_path')
-            
+           
             if not mask_path or not os.path.exists(mask_path):
                 # Fallback: find by type and source name
                 defect_type = entry['type']
@@ -1635,31 +1700,31 @@ class DefectPlacementTool(QMainWindow):
                         break
                 if not mask_path:
                     continue
-            
+           
             # If we don't have the defect image path, try to find it
             if not defect_image_path or not os.path.exists(defect_image_path):
                 defect_image_path = self._find_corresponding_defect_image(mask_path)
                 if not defect_image_path:
                     continue
-            
+           
             try:
                 # Load the defect image first
                 defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
-                
+               
                 # Load the mask with the same size as the defect image
                 mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
-                
+               
                 # Extract only the defect region using the mask
                 defect_tensor = defect_image_tensor * mask_tensor
-                
+               
                 # Crop to tight bounding box around the defect
                 defect_tensor, mask_tensor = self._crop_to_defect_bounding_box(defect_tensor, mask_tensor)
-                
+               
                 self.canvas.add_defect(
                     defect_tensor,
                     mask_tensor,
                     {
-                        'type': entry['type'], 
+                        'type': entry['type'],
                         'source': entry.get('source', 'unknown'),
                         'mask_path': mask_path,
                         'defect_image_path': defect_image_path
@@ -1672,7 +1737,7 @@ class DefectPlacementTool(QMainWindow):
                 self.canvas.selected_defect.update_transform(entry['scale'], entry['rotation'], entry['opacity'])
             except Exception:
                 continue
-        
+       
         # Restore regions
         for entry in state.get('regions', []):
             try:
@@ -1680,21 +1745,21 @@ class DefectPlacementTool(QMainWindow):
                 original_rect = entry.get('original_rect')
                 if not original_rect:
                     continue
-                    
+                   
                 x, y, w, h = original_rect
-                
+               
                 # Extract region from current background image
                 if self.canvas.background_item:
                     region_pixmap = self.canvas.background_item.pixmap().copy(x, y, w, h)
-                    
+                   
                     # Create mask
                     mask_pixmap = QPixmap(w, h)
                     mask_pixmap.fill(Qt.white)
-                    
+                   
                     # Create region item
                     region_item = SelectedRegionItem(
-                        region_pixmap, 
-                        mask_pixmap, 
+                        region_pixmap,
+                        mask_pixmap,
                         {
                             'type': entry['type'],
                             'source': entry.get('source', 'unknown'),
@@ -1702,53 +1767,53 @@ class DefectPlacementTool(QMainWindow):
                         },
                         exclude_masks=entry.get('exclude_masks', False)
                     )
-                    
+                   
                     # Set position and add to scene
                     region_item.setPos(entry['x'], entry['y'])
                     self.scene.addItem(region_item)
                     self.region_items.append(region_item)
-                    
+                   
                     # Apply transform parameters
                     region_item.update_transform(entry['scale'], entry['rotation'], entry['opacity'])
             except Exception:
                 continue
-                
+               
         self.has_unsaved_changes = True
-                
+               
     def add_defect_to_canvas(self, item=None):
         """Add selected defect to canvas"""
         if not item:
             item = self.defect_list.currentItem()
-            
+           
         if not item or not self.current_image_path:
             return
-            
+           
         # Get mask path from item data
         mask_path = item.data(Qt.UserRole)
         item_text = item.text()
         defect_type = item_text.split(" - ")[0]
-        
+       
         try:
             # Find the corresponding defect image first
             defect_image_path = self._find_corresponding_defect_image(mask_path)
             if not defect_image_path:
                 QMessageBox.warning(self, "Warning", f"No corresponding defect image found for {os.path.basename(mask_path)}")
                 return
-                
+               
             # Load the defect image
             defect_image_tensor, _ = self._load_image_tensor(defect_image_path)
-            
+           
             # Load the mask with the same size as the defect image
             mask_tensor = self._load_mask_tensor(mask_path, target_size=(defect_image_tensor.shape[1], defect_image_tensor.shape[2]))
-            
+           
             # Extract only the defect region using the mask
             # The mask tells us where the defect is in the original image
             # Apply the mask to each channel and set background to transparent (0)
             defect_tensor = defect_image_tensor * mask_tensor
-            
+           
             # Crop to tight bounding box around the defect
             defect_tensor, mask_tensor = self._crop_to_defect_bounding_box(defect_tensor, mask_tensor)
-            
+           
             # Add to canvas
             exclude_masks = self.exclude_mask_cb.isChecked()
             self.canvas.add_defect(
@@ -1762,7 +1827,7 @@ class DefectPlacementTool(QMainWindow):
                 },
                 exclude_masks=exclude_masks
             )
-            
+           
             # Reset transformation controls to defaults for the new defect
             self.scale_slider.setValue(100)
             self.rotation_slider.setValue(0)
@@ -1772,86 +1837,86 @@ class DefectPlacementTool(QMainWindow):
             self.opacity_label.setText("0.7")
 
             self.status_bar.showMessage(f"Added defect: {defect_type}")
-            
+           
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load defect mask:\n{str(e)}")
-                
+               
     def _crop_to_defect_bounding_box(self, defect_tensor, mask_tensor):
         """Crop defect and mask to tight bounding box around the defect"""
         if mask_tensor.sum() == 0:
             return defect_tensor, mask_tensor
-            
+           
         # Find bounding box of non-zero mask values
         mask_binary = mask_tensor > 0.5
         coords = torch.where(mask_binary.squeeze(0))
-        
+       
         if len(coords[0]) == 0:
             return defect_tensor, mask_tensor
-            
+           
         y_min, y_max = coords[0].min().item(), coords[0].max().item()
         x_min, x_max = coords[1].min().item(), coords[1].max().item()
-        
+       
         # Add small margin for better visual appearance
         margin = 5
         y_min = max(0, int(y_min - margin))
         y_max = min(mask_tensor.shape[1], int(y_max + margin))
         x_min = max(0, int(x_min - margin))
         x_max = min(mask_tensor.shape[2], int(x_max + margin))
-        
+       
         # Crop both defect and mask
         cropped_defect = defect_tensor[:, y_min:y_max, x_min:x_max]
         cropped_mask = mask_tensor[:, y_min:y_max, x_min:x_max]
-        
+       
         return cropped_defect, cropped_mask
 
     def extract_defect(self, image, mask):
         """Extract defect region from image"""
         if mask.sum() == 0:
             return None, None
-            
+           
         # Find bounding box
         mask_binary = mask > 0.5
         coords = torch.where(mask_binary.squeeze(0))
-        
+       
         if len(coords[0]) == 0:
             return None, None
-            
+           
         y_min, y_max = coords[0].min().item(), coords[0].max().item()
         x_min, x_max = coords[1].min().item(), coords[1].max().item()
-        
+       
         # Add margin
         margin = 10
         y_min = max(0, y_min - margin)
         y_max = min(mask.shape[1], y_max + margin)
         x_min = max(0, x_min - margin)
         x_max = min(mask.shape[2], x_max + margin)
-        
+       
         # Extract region
         defect_region = image[:, y_min:y_max, x_min:x_max]
         defect_mask = mask[:, y_min:y_max, x_min:x_max]
-        
+       
         return defect_region, defect_mask
-        
+       
     def update_defect_transform(self):
         """Update transformation of selected defect or region"""
         selected_item = self.canvas.selected_defect or self.canvas.selected_region
         if not selected_item:
             return
-            
+           
         scale = self.scale_slider.value() / 100.0
         rotation = self.rotation_slider.value()
         opacity = self.opacity_slider.value() / 100.0
-        
+       
         self.scale_label.setText(f"{scale:.1f}x")
         self.rotation_label.setText(f"{rotation}°")
         self.opacity_label.setText(f"{opacity:.1f}")
-        
+       
         # Update selected item (defect or region)
         selected_item.update_transform(scale, rotation, opacity)
         self._mark_unsaved()
-        
+       
     # [Removed] toggle_mask_display
-        
+       
     def remove_selected_defect(self):
         """Remove selected defect or region from canvas"""
         if self.canvas.selected_defect:
@@ -1860,32 +1925,32 @@ class DefectPlacementTool(QMainWindow):
         elif self.canvas.selected_region:
             self.canvas.remove_selected_region()
             self.status_bar.showMessage("Removed selected region")
-        
+       
     def clear_all_defects(self):
         """Clear all defects and regions from canvas"""
         # Check for unsaved changes before clearing
         if not self._check_unsaved_changes("clearing all defects and regions"):
             return
-            
+           
         self.canvas.clear_defects()
         self.canvas.clear_regions()
         self.status_bar.showMessage("Cleared all defects and regions")
-    
+   
     def clear_paint_layer(self):
         """Clear the paint layer"""
         # Check for unsaved changes before clearing paint
         if not self._check_unsaved_changes("clearing paint layer"):
             return
-            
+           
         self.canvas.clear_paint_layer()
         self.status_bar.showMessage("Cleared paint layer")
-        
+       
     def clear_all(self):
         """Clear everything"""
         # Check for unsaved changes before clearing everything
         if not self._check_unsaved_changes("clearing everything"):
             return
-            
+           
         self.canvas.clear_defects()
         self.canvas.clear_regions()
         self.canvas.clear_paint_layer()
@@ -1894,7 +1959,7 @@ class DefectPlacementTool(QMainWindow):
         self.canvas.selected_defect = None
         self.canvas.selected_region = None
         self.status_bar.showMessage("Cleared canvas")
-    
+   
     def _mark_unsaved(self):
         self.has_unsaved_changes = True
         # Mark current image as unsaved if it was previously saved
@@ -1902,7 +1967,7 @@ class DefectPlacementTool(QMainWindow):
             self.saved_images.remove(self.current_image_path)
         # Update window title to show unsaved changes
         self._update_window_title()
-    
+   
     def _update_window_title(self):
         """Update window title to show unsaved changes"""
         base_title = "DefectPaste - Interactive Defect Placement Tool"
@@ -1910,20 +1975,20 @@ class DefectPlacementTool(QMainWindow):
             self.setWindowTitle(f"{base_title} *")
         else:
             self.setWindowTitle(base_title)
-    
+   
     def _check_unsaved_changes(self, action_name="this action"):
         """Check for unsaved changes and prompt user to save"""
         if not self.has_unsaved_changes:
             return True
-        
+       
         # Check if there are actual changes (defects, regions, or paint)
         has_defects = len(self.canvas.defect_items) > 0
         has_regions = len(self.canvas.region_items) > 0
         has_paint = self.has_unsaved_paint_changes()
-        
+       
         if not (has_defects or has_regions or has_paint):
             return True
-        
+       
         # Create appropriate message
         if has_defects and has_regions and has_paint:
             message = f"You have unsaved defects, regions, and paint changes. Do you want to save before {action_name}?"
@@ -1939,7 +2004,7 @@ class DefectPlacementTool(QMainWindow):
             message = f"You have unsaved regions. Do you want to save before {action_name}?"
         else:
             message = f"You have unsaved paint changes. Do you want to save before {action_name}?"
-        
+       
         reply = QMessageBox.question(
             self,
             "Unsaved Changes",
@@ -1947,7 +2012,7 @@ class DefectPlacementTool(QMainWindow):
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
             QMessageBox.Yes
         )
-        
+       
         if reply == QMessageBox.Yes:
             self.save_augmented_image()
             return True
@@ -1955,12 +2020,12 @@ class DefectPlacementTool(QMainWindow):
             return True
         else:  # Cancel
             return False
-    
+   
     def has_unsaved_paint_changes(self):
         """Check if there are unsaved paint changes"""
         if not self.canvas.paint_layer or self.canvas.paint_layer.isNull():
             return False
-        
+       
         # Check if paint layer has any non-transparent content
         paint_image = self.canvas.paint_layer.toImage()
         for x in range(paint_image.width()):
@@ -1968,11 +2033,11 @@ class DefectPlacementTool(QMainWindow):
                 if paint_image.pixelColor(x, y).alpha() > 0:
                     return True
         return False
-        
+       
     # [Removed] on_blend_mode_changed (blend mode removed)
 
     # [Removed] on_live_preview_toggled
-        
+       
     def filter_defects(self, filter_type):
         """Filter defect list by type"""
         # Hide or show items based on filter
@@ -1986,79 +2051,173 @@ class DefectPlacementTool(QMainWindow):
         # Auto-select the first visible item so actions use the intended type
         if first_visible_index is not None:
             self.defect_list.setCurrentRow(first_visible_index)
-                
+               
     # [Removed] preview_result and show_preview
+   
+    def extract_segmentation_from_mask(self, mask_pixmap, position):
+        """Extract segmentation polygon and bounding box from a mask pixmap
         
+        Args:
+            mask_pixmap: QPixmap containing the mask
+            position: (x, y) position of the item in the scene
+            
+        Returns:
+            dict with 'bbox' and 'segmentation' keys, or None if extraction fails
+        """
+        try:
+            # Convert QPixmap to QImage
+            mask_image = mask_pixmap.toImage()
+            
+            # Convert to numpy array
+            width = mask_image.width()
+            height = mask_image.height()
+            
+            # Handle different image formats
+            if mask_image.format() != QImage.Format_Grayscale8:
+                mask_image = mask_image.convertToFormat(QImage.Format_Grayscale8)
+            
+            bytes_per_line = mask_image.bytesPerLine()
+            ptr = mask_image.bits()
+            ptr.setsize(height * bytes_per_line)
+            
+            # Create numpy array from mask
+            mask_array = np.frombuffer(ptr, dtype=np.uint8).reshape((height, bytes_per_line))
+            mask_array = mask_array[:, :width].copy()
+            
+            # Threshold to binary
+            _, binary_mask = cv2.threshold(mask_array, 127, 255, cv2.THRESH_BINARY)
+            
+            # Find contours
+            contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            if not contours:
+                return None
+            
+            # Get the largest contour
+            largest_contour = max(contours, key=cv2.contourArea)
+            
+            # Get bounding box
+            x, y, w, h = cv2.boundingRect(largest_contour)
+            
+            # Convert to absolute coordinates (add item position)
+            item_x, item_y = position
+            abs_bbox = [item_x + x, item_y + y, w, h]
+            
+            # Extract segmentation points and convert to absolute coordinates
+            segmentation = []
+            for point in largest_contour:
+                px = float(point[0][0] + item_x)
+                py = float(point[0][1] + item_y)
+                segmentation.append([px, py])
+            
+            return {
+                'bbox': abs_bbox,
+                'segmentation': [segmentation]  # COCO format: list of polygons
+            }
+            
+        except Exception as e:
+            print(f"Error extracting segmentation: {e}")
+            return None
+   
     def save_augmented_image(self):
         """Save the augmented image and mask"""
         result_image, result_mask = self.canvas.get_augmented_image()
-        
+       
         if result_image is None:
             QMessageBox.information(self, "Info", "No defects placed yet")
             return
-            
+           
         # Check if any items have exclude_masks set to True
         has_excluded_masks = any(item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
         # Check if any items were created in normal mode (don't exclude masks)
         has_normal_mode_items = any(not item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
-            
+           
         # Get save path
         save_path, _ = QFileDialog.getSaveFileName(
             self, "Save Augmented Image", os.getcwd(), "PNG Files (*.png)"
         )
-        
+       
         if save_path:
             # Save image
             image_pil = TF.to_pil_image(result_image)
             image_pil.save(save_path)
-            
+           
             # Save mask only if there are items that were created in normal mode
             if has_normal_mode_items:
                 mask_path = save_path.replace('.png', '_mask.png')
                 mask_pil = TF.to_pil_image(result_mask)
                 mask_pil.save(mask_path)
-            
+           
             # Save metadata
+            # Extract segmentation for defects
+            defects_metadata = []
+            for item in self.canvas.defect_items:
+                defect_meta = {
+                    'label': item.defect_data.get('type', 'unknown'),
+                    'position': item.get_position(),
+                    'scale': item.scale_factor,
+                    'rotation': item.rotation_angle,
+                    'opacity': item.opacity,
+                    'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
+                    'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
+                }
+                
+                # Extract segmentation from mask if not excluded
+                if not item.exclude_masks and hasattr(item, 'mask_pixmap'):
+                    seg_data = self.extract_segmentation_from_mask(item.mask_pixmap, item.get_position())
+                    if seg_data:
+                        defect_meta['bbox'] = seg_data['bbox']
+                        defect_meta['segmentation'] = seg_data['segmentation']
+                
+                defects_metadata.append(defect_meta)
+            
+            # Extract segmentation for regions
+            regions_metadata = []
+            for item in self.canvas.region_items:
+                region_meta = {
+                    'label': 'selection_label',
+                    'position': item.get_position(),
+                    'scale': item.scale_factor,
+                    'rotation': item.rotation_angle,
+                    'opacity': item.opacity,
+                    'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
+                    'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
+                }
+                
+                # Extract segmentation from mask if not excluded
+                if not item.exclude_masks:
+                    # Try to get segmentation from mask
+                    if hasattr(item, 'mask_pixmap'):
+                        seg_data = self.extract_segmentation_from_mask(item.mask_pixmap, item.get_position())
+                        if seg_data:
+                            region_meta['bbox'] = seg_data['bbox']
+                            region_meta['segmentation'] = seg_data['segmentation']
+                    # Fallback to freehand_points if available
+                    elif item.region_data.get('freehand_points'):
+                        region_meta['segmentation'] = [item.region_data.get('freehand_points')]
+                        if item.region_data.get('original_rect'):
+                            region_meta['bbox'] = item.region_data.get('original_rect')
+                
+                regions_metadata.append(region_meta)
+            
             metadata = {
                 'target_image': os.path.basename(self.current_image_path),
                 'target_image_path': self.current_image_path,
                 'has_excluded_masks': has_excluded_masks,
-                'defects': [
-                    {
-                        'label': item.defect_data.get('type', 'unknown'),
-                        'position': item.get_position(),
-                        'scale': item.scale_factor,
-                        'rotation': item.rotation_angle,
-                        'opacity': item.opacity,
-                        'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
-                        'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
-                    }
-                    for item in self.canvas.defect_items
-                ],
-                'regions': [
-                    {
-                        'label': 'selection_label',
-                        'position': item.get_position(),
-                        'scale': item.scale_factor,
-                        'rotation': item.rotation_angle,
-                        'opacity': item.opacity,
-                        'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
-                        'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
-                    }
-                    for item in self.canvas.region_items
-                ]
+                'defects': defects_metadata,
+                'regions': regions_metadata
             }
-            
+           
             meta_path = save_path.replace('.png', '_metadata.json')
             with open(meta_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
-                
+               
             # Mark current image as saved
             if self.current_image_path:
                 self.saved_images.add(self.current_image_path)
                 self.has_unsaved_changes = False
                 self._update_window_title()
-            
+           
             status_msg = f"Saved to: {save_path}"
             if has_excluded_masks and has_normal_mode_items:
                 status_msg += " (mixed: some masks excluded, some included)"
@@ -2068,7 +2227,7 @@ class DefectPlacementTool(QMainWindow):
                 status_msg += " (masks included)"
             self.status_bar.showMessage(status_msg)
             QMessageBox.information(self, "Success", "Augmented image saved successfully!")
-    
+   
     def _find_next_index(self, directory: str, base_name: str) -> int:
         """Return next integer index to use for files named like base_name_#.png in directory."""
         try:
@@ -2099,29 +2258,29 @@ class DefectPlacementTool(QMainWindow):
             return self.target_images.index(image_path)
         except ValueError:
             return None
-    
+   
     def _find_corresponding_defect_image(self, mask_path: str) -> Optional[str]:
         """Find the corresponding defect image for a given mask path by matching filenames"""
         if not self.defect_images_dir or not hasattr(self, 'defect_images') or not self.defect_images:
             return None
-            
+           
         # Get the mask filename without extension
         mask_filename = os.path.splitext(os.path.basename(mask_path))[0]
-        
+       
         # Try to find exact filename match first
         for defect_img in self.defect_images:
             defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
             if defect_filename == mask_filename:
                 return defect_img
-        
+       
         # If no exact match, try partial matching (in case of slight naming differences)
         for defect_img in self.defect_images:
             defect_filename = os.path.splitext(os.path.basename(defect_img))[0]
             # Check if one filename contains the other (case-insensitive)
-            if (mask_filename.lower() in defect_filename.lower() or 
+            if (mask_filename.lower() in defect_filename.lower() or
                 defect_filename.lower() in mask_filename.lower()):
                 return defect_img
-        
+       
         # If still no match, try to match by defect type directory
         try:
             mask_rel_path = os.path.relpath(mask_path, self.defect_masks_dir)
@@ -2134,7 +2293,7 @@ class DefectPlacementTool(QMainWindow):
                         return defect_img
         except ValueError:
             pass
-                
+               
         return None
 
     def save_all_augmentations(self):
@@ -2153,10 +2312,10 @@ class DefectPlacementTool(QMainWindow):
             return
         start_idx = self._find_next_index(output_dir, base_name)
         current_idx = start_idx
-        
+       
         # Remember current context to restore later
         orig_image_path = self.current_image_path
-        
+       
         num_saved = 0
         # Iterate deterministically
         for key in list(self.augmentation_states.keys()):
@@ -2175,68 +2334,97 @@ class DefectPlacementTool(QMainWindow):
             result_image, result_mask = self.canvas.get_augmented_image()
             if result_image is None:
                 continue
-            
+           
             # Check if any items have exclude_masks set to True
             has_excluded_masks = any(item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
             # Check if any items were created in normal mode (don't exclude masks)
             has_normal_mode_items = any(not item.exclude_masks for item in self.canvas.defect_items + self.canvas.region_items)
-            
+           
             # Save files
             img_filename = f"{base_name}_{current_idx}.png"
             img_path = os.path.join(output_dir, img_filename)
             image_pil = TF.to_pil_image(result_image)
             image_pil.save(img_path)
-            
+           
             # Save mask only if there are items that were created in normal mode
             if has_normal_mode_items:
                 mask_filename = f"{base_name}_{current_idx}_mask.png"
                 mask_path = os.path.join(output_dir, mask_filename)
                 mask_pil = TF.to_pil_image(result_mask)
                 mask_pil.save(mask_path)
-            
+           
             # Save metadata
+            # Extract segmentation for defects
+            defects_metadata = []
+            for item in self.canvas.defect_items:
+                defect_meta = {
+                    'label': item.defect_data.get('type', 'unknown'),
+                    'position': item.get_position(),
+                    'scale': item.scale_factor,
+                    'rotation': item.rotation_angle,
+                    'opacity': item.opacity,
+                    'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
+                    'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
+                }
+                
+                # Extract segmentation from mask if not excluded
+                if not item.exclude_masks and hasattr(item, 'mask_pixmap'):
+                    seg_data = self.extract_segmentation_from_mask(item.mask_pixmap, item.get_position())
+                    if seg_data:
+                        defect_meta['bbox'] = seg_data['bbox']
+                        defect_meta['segmentation'] = seg_data['segmentation']
+                
+                defects_metadata.append(defect_meta)
+            
+            # Extract segmentation for regions
+            regions_metadata = []
+            for item in self.canvas.region_items:
+                region_meta = {
+                    'label': 'selection_label',
+                    'position': item.get_position(),
+                    'scale': item.scale_factor,
+                    'rotation': item.rotation_angle,
+                    'opacity': item.opacity,
+                    'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
+                    'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
+                }
+                
+                # Extract segmentation from mask if not excluded
+                if not item.exclude_masks:
+                    # Try to get segmentation from mask
+                    if hasattr(item, 'mask_pixmap'):
+                        seg_data = self.extract_segmentation_from_mask(item.mask_pixmap, item.get_position())
+                        if seg_data:
+                            region_meta['bbox'] = seg_data['bbox']
+                            region_meta['segmentation'] = seg_data['segmentation']
+                    # Fallback to freehand_points if available
+                    elif item.region_data.get('freehand_points'):
+                        region_meta['segmentation'] = [item.region_data.get('freehand_points')]
+                        if item.region_data.get('original_rect'):
+                            region_meta['bbox'] = item.region_data.get('original_rect')
+                
+                regions_metadata.append(region_meta)
+            
             metadata = {
                 'target_image': os.path.basename(key),
                 'target_image_path': key,
                 'has_excluded_masks': has_excluded_masks,
-                'defects': [
-                    {
-                        'label': item.defect_data.get('type', 'unknown'),
-                        'position': item.get_position(),
-                        'scale': item.scale_factor,
-                        'rotation': item.rotation_angle,
-                        'opacity': item.opacity,
-                        'mask_path': item.defect_data.get('mask_path') if not item.exclude_masks else None,
-                        'defect_image_path': item.defect_data.get('defect_image_path') if not item.exclude_masks else None
-                    }
-                    for item in self.canvas.defect_items
-                ],
-                'regions': [
-                    {
-                        'label': 'selection_label',
-                        'position': item.get_position(),
-                        'scale': item.scale_factor,
-                        'rotation': item.rotation_angle,
-                        'opacity': item.opacity,
-                        'original_rect': item.region_data.get('original_rect') if not item.exclude_masks else None,
-                        'source': item.region_data.get('source', 'unknown') if not item.exclude_masks else None
-                    }
-                    for item in self.canvas.region_items
-                ]
+                'defects': defects_metadata,
+                'regions': regions_metadata
             }
             meta_path = os.path.join(output_dir, f"{base_name}_{current_idx}_metadata.json")
             with open(meta_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             current_idx += 1
             num_saved += 1
-        
+       
         # Restore original context
         if orig_image_path is not None:
             self.current_image_path = orig_image_path
             image_tensor = self._load_image_tensor(orig_image_path)
             self.canvas.set_background_image(image_tensor)
             self.restore_state_from_cache()
-        
+       
         if num_saved == 0:
             QMessageBox.information(self, "Info", "No augmentations were saved.")
         else:
@@ -2247,29 +2435,29 @@ class DefectPlacementTool(QMainWindow):
             self.has_unsaved_changes = False
             self._update_window_title()
             QMessageBox.information(self, "Success", f"Saved {num_saved} augmentations to {output_dir}.")
-            
+           
     # [Removed] export_batch
-        
+       
     def on_defect_placed(self, info):
         """Handle defect placement signal"""
         self.status_bar.showMessage(
             f"Placed {info['type']} at ({info['position'][0]:.0f}, {info['position'][1]:.0f})"
         )
         self._mark_unsaved()
-    
+   
     def on_brush_mode_changed(self, mode):
         """Handle brush mode change"""
         self.canvas.brush_mode = mode
         self.status_bar.showMessage(f"Brush mode changed to: {mode}")
-    
+   
     def update_brush_settings(self):
         """Update brush settings from UI controls"""
         size = self.brush_size_slider.value()
         opacity = self.brush_opacity_slider.value()
-        
+       
         self.brush_size_label.setText(f"{size}px")
         self.brush_opacity_label.setText(f"{opacity}%")
-        
+       
         # Update canvas brush settings
         self.canvas.set_brush_settings(
             self.brush_enabled_cb.isChecked(),
@@ -2278,7 +2466,7 @@ class DefectPlacementTool(QMainWindow):
             opacity,
             self.canvas.brush_color
         )
-    
+   
     def choose_brush_color(self):
         """Open color dialog to choose brush color"""
         color = QColorDialog.getColor(self.canvas.brush_color, self, "Choose Brush Color")
@@ -2287,21 +2475,21 @@ class DefectPlacementTool(QMainWindow):
             # Update button color
             self.brush_color_btn.setStyleSheet(f"background-color: {color.name()}; color: {'white' if color.lightness() < 128 else 'black'};")
             self.update_brush_settings()
-    
+   
     def toggle_brush_tool(self, enabled):
         """Toggle brush tool on/off"""
         self.canvas.brush_enabled = enabled
         self.update_brush_settings()
-        
+       
         if enabled:
             self.status_bar.showMessage("Paint brush enabled - Click and drag to paint")
         else:
             self.status_bar.showMessage("Paint brush disabled")
-    
+   
     def toggle_selection_tool(self, enabled):
         """Toggle selection tool on/off"""
         self.canvas.selection_enabled = enabled
-        
+       
         if enabled:
             self.status_bar.showMessage("Selection tool enabled - Click and drag to select region (auto-creates draggable region)")
             # Disable brush tool when selection is enabled
@@ -2314,23 +2502,23 @@ class DefectPlacementTool(QMainWindow):
             self.status_bar.showMessage("Selection tool disabled")
             self.canvas.clear_selection()
             self.canvas.setCursor(Qt.ArrowCursor)
-    
+   
     def on_selection_mode_changed(self, mode):
         """Handle selection mode change"""
         self.canvas.selection_mode = mode
         self.status_bar.showMessage(f"Selection mode changed to: {mode}")
-    
+   
     def copy_selection(self):
         """Copy the current selection"""
         self.canvas.copy_selection()
         self.status_bar.showMessage("Selection copied as draggable region")
         self._mark_unsaved()
-    
+   
     def clear_selection(self):
         """Clear the current selection"""
         self.canvas.clear_selection()
         self.status_bar.showMessage("Selection cleared")
-    
+   
     def on_region_placed(self, info):
         """Handle region placement signal"""
         if 'has_selection' in info:
@@ -2347,7 +2535,7 @@ class DefectPlacementTool(QMainWindow):
             self.save_current_state_to_cache()
         except Exception:
             pass
-        
+       
         # Use the comprehensive save checking system
         if not self._check_unsaved_changes("exiting the application"):
             event.ignore()
@@ -2359,15 +2547,15 @@ def main():
     """Main entry point"""
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # Modern look
-    
+   
     # Set application info
     app.setApplicationName("DefectPaste")
     app.setOrganizationName("Defect Augmentation")
-    
+   
     # Create and show main window
     window = DefectPlacementTool()
     window.show()
-    
+   
     sys.exit(app.exec_())
 
 
